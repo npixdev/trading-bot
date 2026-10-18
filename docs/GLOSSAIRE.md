@@ -17,6 +17,10 @@ Interface qui permet à un programme de parler à l'exchange. Une clé API = un 
 Prix auquel un vendeur est prêt à vendre. Le « meilleur ask » est le plus bas.
 *Ex. : meilleur ask à 60 010 € → c'est le prix minimum que tu paieras en achetant au marché.*
 
+**Backtest** [2]
+Simulation d'une stratégie sur des données passées, bougie par bougie, avec frais et slippage. Toujours plus optimiste que la réalité : c'est un filtre pour éliminer les mauvaises idées, pas une promesse.
+*Ex. : une stratégie qui fait −57 % en backtest fera presque sûrement pire en réel. Une qui fait +800 % doit d'abord être soupçonnée.*
+
 **Base / Quote** [0]
 Dans la paire `BTC/EUR`, BTC est la **base** (ce que tu achètes), EUR la **quote** (ce avec quoi tu paies).
 *Ex. : BTC/EUR = 60 000 → 1 BTC coûte 60 000 €.*
@@ -37,6 +41,10 @@ La bougie en cours : sa clôture, son plus haut et son plus bas peuvent encore c
 Acheter et garder, sans rien faire. C'est **la référence** que toute stratégie doit battre (en rendement ou en risque).
 *Ex. : 10 000 € de BTC achetés début 2023 à ~16 500 $ valaient plusieurs fois plus fin 2024. Un bot qui a fait +40 % sur la même période a « gagné », mais a fait bien pire que ne rien faire.*
 
+**CAGR (taux de croissance annuel composé)** [2]
+Le rendement « moyen par an » qui, composé, donne le rendement total. Permet de comparer des périodes de durées différentes.
+*Ex. : +179 % en 5,8 ans → CAGR = 2,79^(1/5,8) − 1 ≈ +19,4 %/an. Ce n'est pas +179/5,8 = 31 %.*
+
 **Carnet d'ordres (*order book*)** [0]
 Liste en temps réel des ordres d'achat (bids) et de vente (asks) en attente, classés par prix.
 
@@ -52,8 +60,16 @@ Liste en temps réel des ordres d'achat (bids) et de vente (asks) en attente, cl
 Perte, en %, entre le plus haut atteint et le point actuel. Le *max drawdown* est la pire de ces chutes : c'est la douleur maximale qu'il aurait fallu encaisser.
 *Ex. : BTC à 68 634 $ en novembre 2021, puis à ~15 800 $ en novembre 2022 → drawdown de −77 %. 10 000 € investis au sommet n'en valaient plus que 2 300.*
 
+**Equity (courbe d'equity)** [2]
+Valeur totale du portefeuille (cash + crypto au prix du moment) à chaque instant. Toutes les métriques en découlent.
+*Ex. : 2 000 € de cash + 0,1 BTC à 80 000 € → equity = 10 000 €.*
+
 **Exchange** [0]
 Plateforme où l'on échange des cryptos contre d'autres cryptos ou des euros.
+
+**Exposition** [2]
+Part du temps (ou du capital) investie en crypto. Moins on est exposé, moins on subit les chutes… et les hausses.
+*Ex. : exposition 50 % → investi la moitié des heures. Même sans aucun talent, on capte en moyenne ~50 % de la tendance (en log).*
 
 **Frais maker / taker** [0]
 **Taker** : ton ordre s'exécute immédiatement contre un ordre existant (il *prend* de la liquidité) → frais plus élevés. **Maker** : ton ordre attend dans le carnet (il *ajoute* de la liquidité) → frais plus bas.
@@ -69,6 +85,10 @@ Contrats qui suivent le prix d'une crypto sans la posséder, généralement avec
 **Levier** [0]
 Multiplier son exposition avec de l'argent emprunté. Multiplie les gains **et** les pertes.
 *Ex. : levier x10 avec 1 000 € → tu contrôles 10 000 € de BTC. Le BTC baisse de 10 % → −1 000 € → ta mise est entièrement perdue (liquidation).*
+
+**Hors échantillon (*out-of-sample*, OOS)** [2]
+Données qui n'ont **pas** servi à choisir la stratégie ou ses paramètres. Seule la performance hors échantillon a une valeur prédictive.
+*Ex. : paramètres choisis sur 2021-2024 (Sharpe 2,0), évalués sur 2025 (Sharpe 0,3) → c'est 0,3 qu'il faut croire.*
 
 **Liquidation** [0]
 Fermeture forcée d'une position à effet de levier quand ta mise ne couvre plus les pertes. Tu perds tout ce que tu avais mis.
@@ -121,6 +141,10 @@ L'API ne renvoie qu'un nombre limité de bougies par requête (~1 000 sur Binanc
 **Paire** [0]
 Les deux actifs échangés, notés `BASE/QUOTE`. Voir *Base / Quote*.
 
+**Position cible** [2]
+Ce que la stratégie veut détenir, en fraction du capital : 0 = tout en cash, 1 = tout investi. Le moteur en déduit les ordres.
+*Ex. : capital 10 000 €, cible 0,5 → le moteur achète pour ~5 000 € de BTC à l'ouverture de la bougie suivante.*
+
 **Profondeur (*depth*)** [0]
 Quantité disponible dans le carnet à chaque niveau de prix.
 *Ex. : 0,5 BTC au meilleur ask, 1,2 BTC au niveau suivant → acheter 1 BTC « mange » deux niveaux.*
@@ -129,9 +153,17 @@ Quantité disponible dans le carnet à chaque niveau de prix.
 Nombre maximum de requêtes autorisées par l'exchange sur une période. Au-delà : erreur, puis bannissement temporaire de ton IP ou de ta clé. ccxt espace automatiquement les requêtes (`enableRateLimit`).
 *Ex. : si l'exchange autorise ~20 requêtes/s et que ton bot en envoie 100 d'un coup, il peut être bloqué plusieurs minutes, au pire moment (pendant un krach).*
 
+**Sharpe (ratio de)** [2]
+Rendement moyen ÷ volatilité, annualisé (taux sans risque pris à 0). Mesure le gain par unité de « secousse ». Repères : < 0 perd de l'argent ; 0,5 ≈ buy & hold BTC ; > 1 bon ; > 2 durablement : suspect (bug, look-ahead ou surapprentissage).
+*Ex. : deux stratégies à +20 %/an ; l'une avec 20 % de volatilité (Sharpe 1), l'autre 80 % (Sharpe 0,25). La première est bien meilleure.*
+
 **Slippage (glissement)** [0]
 Écart entre le prix attendu et le prix réellement obtenu.
 *Ex. : tu voulais acheter à 60 010 €, tu obtiens une moyenne de 60 016 € → slippage de 6 € (0,01 %). Lors d'un krach, il peut atteindre plusieurs %.*
+
+**Sortino (ratio de)** [2]
+Comme le Sharpe, mais ne compte comme « risque » que les baisses. Une stratégie avec de grosses hausses et de petites baisses a un Sortino nettement supérieur à son Sharpe.
+*Ex. : BTC 2021-2026 : Sharpe 0,60, Sortino 0,84.*
 
 **Spot** [0]
 Achat réel de la crypto, payée intégralement. On ne peut pas perdre plus que sa mise. **Seul mode autorisé dans ce projet.**
@@ -149,6 +181,10 @@ Crypto conçue pour valoir 1 dollar (ou 1 euro). USDT, USDC. Sert de « cash » 
 Ajuster une stratégie si précisément au passé qu'elle capture du bruit (du hasard) au lieu d'un vrai phénomène. Elle s'effondre sur des données nouvelles.
 *Ex. : tu testes 500 combinaisons de paramètres, la meilleure affiche +300 % sur 2021-2023. Sur 2024, elle fait −15 % pendant que le buy & hold fait +100 %.*
 
+**Train / test** [2]
+Découpage chronologique de l'historique : on choisit les paramètres sur la partie *train* (entraînement), on juge sur la partie *test* jamais vue. Jamais de mélange aléatoire : le futur ne doit pas servir à prédire le passé.
+*Ex. : 70/30 sur 2021-2026 → train 2021-01 à 2025-01, test 2025-01 à 2026-10.*
+
 **Testnet / démo** [0]
 Version de l'exchange avec de l'argent fictif, pour tester un bot en conditions quasi réelles sans risque.
 
@@ -158,3 +194,11 @@ Durée d'une bougie : 1m, 5m, 1h, 4h, 1d… Plus il est court, plus il y a de br
 
 **USDT / USDC** [0]
 Les deux principaux stablecoins en dollars. En Europe, USDT est restreint sur la plupart des plateformes agréées MiCA ; USDC y est disponible.
+
+**Walk-forward** [2]
+Répéter train/test en glissant dans le temps : optimiser sur 1 an, tester sur les 3 mois suivants, avancer de 3 mois, recommencer. Les périodes de test mises bout à bout forment une performance hors échantillon sur plusieurs régimes de marché.
+*Ex. : 2021-2026 avec train 1 an / test 3 mois → 20 fenêtres de test, de janv. 2022 à oct. 2026.*
+
+**Win rate (taux de réussite)** [2]
+Part des trades clôturés gagnants. Seul, il ne veut rien dire : on peut gagner 90 % du temps et perdre de l'argent si les 10 % de pertes sont énormes.
+*Ex. : 9 trades à +1 % et 1 trade à −15 % → win rate 90 %, résultat ≈ −6,7 %.*

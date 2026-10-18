@@ -27,9 +27,19 @@ class TradingConfig:
 
 
 @dataclass(frozen=True)
+class BacktestConfig:
+    """Coûts de simulation. Frais et slippage en fraction : 0.001 = 0,1 %."""
+
+    fee: float = 0.001  # taker OKX palier de base
+    slippage: float = 0.0005  # volontairement pessimiste pour du BTC en petite taille
+    initial_cash: float = 10_000.0
+
+
+@dataclass(frozen=True)
 class AppConfig:
     data: DataConfig = field(default_factory=DataConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
+    backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
@@ -45,4 +55,5 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
     return AppConfig(
         data=DataConfig(**data),
         trading=TradingConfig(**(raw.get("trading") or {})),
+        backtest=BacktestConfig(**(raw.get("backtest") or {})),
     )

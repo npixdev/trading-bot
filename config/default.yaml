@@ -10,6 +10,11 @@ data:
   since: "2021-01-01"
   dir: data
 
+backtest:
+  fee: 0.001          # 0,10 % par ordre = taker OKX au palier de base
+  slippage: 0.0005    # 0,05 % : pessimiste pour du BTC en petite taille
+  initial_cash: 10000
+
 trading:
   # Exchange utilisé pour paper/testnet/live (étapes 5+). OKX : agréé MiCA, mode démo via ccxt.
   exchange: okx
