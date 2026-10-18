@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from bot.backtest.engine import BacktestResult, run_backtest
+from bot.backtest.metrics import Metrics, compute_metrics
 from bot.config import BacktestConfig
 from bot.strategies.base import Strategy
 
@@ -66,13 +67,18 @@ def optimize(
 ) -> tuple[dict[str, Any], float]:
     """Meilleurs paramètres sur [start, end], en ne fournissant aux stratégies que df jusqu'à `end`."""
     train = df.loc[:end]
-    best_params: dict[str, Any] = {}
+    best_params: dict[str, Any] | None = None
     best_score = -math.inf
     for params in param_grid(grid):
-        result = run_backtest(train, factory(**params), config, start=start, end=end)
-        score = getattr(result.metrics, metric)
-        if not math.isnan(score) and score > best_score:
-            best_params, best_score = params, score
+        try:
+            strategy = factory(**params)
+        except ValueError:  # combinaison invalide (ex. fast >= slow) : ignorée
+            continue
+        score = getattr(run_backtest(train, strategy, config, start=start, end=end).metrics, metric)
+        if best_params is None or (not math.isnan(score) and score > best_score):
+            best_params, best_score = params, score if not math.isnan(score) else -math.inf
+    if best_params is None:
+        raise ValueError("aucune combinaison de paramètres valide dans la grille")
     return best_params, best_score
 
 
@@ -81,6 +87,21 @@ class WalkForwardResult:
     windows: pd.DataFrame  # une ligne par fenêtre : dates, paramètres choisis, score train, résultat test
     equity: pd.Series  # courbe d'equity hors échantillon, fenêtres de test mises bout à bout
     tests: list[BacktestResult]
+    initial_cash: float
+
+    @property
+    def position(self) -> pd.Series:
+        return pd.concat([t.position for t in self.tests])
+
+    @property
+    def trades(self) -> pd.DataFrame:
+        return pd.concat([t.trades for t in self.tests], ignore_index=True)
+
+    @property
+    def metrics(self) -> Metrics:
+        """Métriques de la courbe hors échantillon complète."""
+        fees = sum(t.fees_paid for t in self.tests)
+        return compute_metrics(self.equity, self.initial_cash, self.trades, self.position, fees)
 
 
 def walk_forward(
@@ -117,4 +138,4 @@ def walk_forward(
             }
         )
     equity = pd.concat([t.equity for t in tests]) if tests else pd.Series(dtype=float)
-    return WalkForwardResult(pd.DataFrame(rows), equity, tests)
+    return WalkForwardResult(pd.DataFrame(rows), equity, tests, config.initial_cash)

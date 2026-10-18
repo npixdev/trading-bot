@@ -45,17 +45,27 @@ class BuyAndHold(Strategy):
 
 @dataclass(frozen=True)
 class RandomStrategy(Strategy):
-    """Entre et sort au hasard, en moyenne toutes les `avg_hold_bars` bougies.
+    """Entre et sort au hasard : positions de `avg_hold_bars` bougies en moyenne, investi
+    une fraction `exposure` du temps.
 
     Sert de témoin : une stratégie sans aucune information. Si une « vraie » stratégie ne fait
-    pas nettement mieux qu'elle, elle n'a probablement rien trouvé.
+    pas nettement mieux qu'elle à exposition et fréquence égales, elle n'a probablement rien trouvé.
     """
 
     name: ClassVar[str] = "random"
-    avg_hold_bars: int = 24
+    avg_hold_bars: float = 24
     seed: int = 0
+    exposure: float = 0.5
 
     def target_position(self, df: pd.DataFrame) -> pd.Series:
         u = np.random.default_rng(self.seed).random(len(df))
-        flips = u < 1.0 / self.avg_hold_bars
-        return pd.Series((np.cumsum(flips) % 2).astype(float), index=df.index)
+        p_exit = 1.0 / self.avg_hold_bars
+        # Durée moyenne hors marché choisie pour que la part du temps investi vaille `exposure`.
+        p_entry = min(1.0, p_exit * self.exposure / (1 - self.exposure))
+        state = np.empty(len(df))
+        current = 0.0
+        for i, ui in enumerate(u):
+            if ui < (p_exit if current else p_entry):
+                current = 1.0 - current
+            state[i] = current
+        return pd.Series(state, index=df.index)

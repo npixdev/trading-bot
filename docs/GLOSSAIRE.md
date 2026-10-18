@@ -29,6 +29,10 @@ Dans la paire `BTC/EUR`, BTC est la **base** (ce que tu achètes), EUR la **quot
 Prix auquel un acheteur est prêt à acheter. Le « meilleur bid » est le plus haut.
 *Ex. : meilleur bid à 60 000 € → si tu vends au marché, tu obtiens au mieux 60 000 €.*
 
+**Bandes de Bollinger** [3]
+Enveloppe autour d'une moyenne mobile : moyenne ± k écarts-types. Quand le prix sort de la bande basse, il est « anormalement bas » par rapport à son passé récent.
+*Ex. : moyenne 20 bougies = 80 000, écart-type = 1 500, k = 2 → bande basse 77 000, bande haute 83 000. Un prix à 76 500 est sous la bande.*
+
 **Bougie (*candle*)** [1]
 Résumé des prix sur une période fixe (le *timeframe*) : ouverture, plus haut, plus bas, clôture, volume. Voir *OHLCV*.
 *Ex. : bougie BTC/USDT 1h du 2021-01-01 01:00 UTC : O=28 995, H=29 470, L=28 960, C=29 410 → le BTC a pris +1,4 % en une heure.*
@@ -55,6 +59,10 @@ Liste en temps réel des ordres d'achat (bids) et de vente (asks) en attente, cl
 **CEX / DEX** [0]
 **CEX** : exchange centralisé, une entreprise garde tes fonds (Kraken, OKX…). **DEX** : exchange décentralisé sur blockchain (Uniswap).
 *Ex. : FTX (CEX) a fait faillite en 2022 avec ~8 Md$ de fonds clients manquants.*
+
+**Canal de Donchian / cassure (*breakout*)** [3]
+Le plus haut et le plus bas des N dernières bougies. Une « cassure » = le prix dépasse ce plus haut : signal qu'une tendance démarre peut-être.
+*Ex. : plus haut des 55 derniers jours = 85 000, clôture à 85 500 → cassure, on achète. On sort si le prix clôture sous le plus bas des 20 derniers jours.*
 
 **Drawdown (chute depuis un sommet)** [1]
 Perte, en %, entre le plus haut atteint et le point actuel. Le *max drawdown* est la pire de ces chutes : c'est la douleur maximale qu'il aurait fallu encaisser.
@@ -86,9 +94,21 @@ Contrats qui suivent le prix d'une crypto sans la posséder, généralement avec
 Multiplier son exposition avec de l'argent emprunté. Multiplie les gains **et** les pertes.
 *Ex. : levier x10 avec 1 000 € → tu contrôles 10 000 € de BTC. Le BTC baisse de 10 % → −1 000 € → ta mise est entièrement perdue (liquidation).*
 
+**Écart-type** [3]
+Mesure de dispersion : de combien les valeurs s'écartent typiquement de leur moyenne. En trading, c'est la mesure standard de la volatilité.
+*Ex. : prix 98, 100, 102 → moyenne 100, écart-type ≈ 1,6. Prix 90, 100, 110 → écart-type ≈ 8,2 : beaucoup plus volatil.*
+
+**Grille de paramètres** [3]
+L'ensemble des combinaisons testées lors de l'optimisation. Plus elle est grande, plus on risque de trouver une combinaison gagnante par pur hasard.
+*Ex. : fast ∈ {10, 20, 50} × slow ∈ {50, 100, 200} = 9 combinaisons (8 valides, car fast < slow).*
+
 **Hors échantillon (*out-of-sample*, OOS)** [2]
 Données qui n'ont **pas** servi à choisir la stratégie ou ses paramètres. Seule la performance hors échantillon a une valeur prédictive.
 *Ex. : paramètres choisis sur 2021-2024 (Sharpe 2,0), évalués sur 2025 (Sharpe 0,3) → c'est 0,3 qu'il faut croire.*
+
+**Moyenne mobile (SMA) / croisement** [3]
+Moyenne des N derniers prix de clôture, recalculée à chaque bougie : une version lissée du prix. Le « croisement » compare une moyenne courte (réactive) à une longue (lente).
+*Ex. : SMA 50 jours = 82 000, SMA 200 jours = 75 000 → la courte est au-dessus : tendance haussière, on est investi.*
 
 **Liquidation** [0]
 Fermeture forcée d'une position à effet de levier quand ta mise ne couvre plus les pertes. Tu perds tout ce que tu avais mis.
@@ -153,6 +173,14 @@ Quantité disponible dans le carnet à chaque niveau de prix.
 Nombre maximum de requêtes autorisées par l'exchange sur une période. Au-delà : erreur, puis bannissement temporaire de ton IP ou de ta clé. ccxt espace automatiquement les requêtes (`enableRateLimit`).
 *Ex. : si l'exchange autorise ~20 requêtes/s et que ton bot en envoie 100 d'un coup, il peut être bloqué plusieurs minutes, au pire moment (pendant un krach).*
 
+**Retour à la moyenne (*mean reversion*)** [3]
+Pari qu'un prix qui s'est beaucoup éloigné de sa moyenne va y revenir. Gagne souvent un peu, perd parfois beaucoup (quand la chute continue).
+*Ex. : win rate de 72 % mais rendement total −32 % en 4h : beaucoup de petits gains, quelques grosses pertes.*
+
+**RSI (*Relative Strength Index*)** [3]
+Indicateur entre 0 et 100 qui compare les hausses récentes aux baisses récentes. < 30 = « survendu » (beaucoup de baisses), > 70 = « suracheté ».
+*Ex. : sur 14 bougies, gains moyens 100 $, pertes moyennes 300 $ → RS = 1/3 → RSI = 100 − 100/(1 + 1/3) = 25 : survendu.*
+
 **Sharpe (ratio de)** [2]
 Rendement moyen ÷ volatilité, annualisé (taux sans risque pris à 0). Mesure le gain par unité de « secousse ». Repères : < 0 perd de l'argent ; 0,5 ≈ buy & hold BTC ; > 1 bon ; > 2 durablement : suspect (bug, look-ahead ou surapprentissage).
 *Ex. : deux stratégies à +20 %/an ; l'une avec 20 % de volatilité (Sharpe 1), l'autre 80 % (Sharpe 0,25). La première est bien meilleure.*
@@ -184,6 +212,18 @@ Ajuster une stratégie si précisément au passé qu'elle capture du bruit (du h
 **Train / test** [2]
 Découpage chronologique de l'historique : on choisit les paramètres sur la partie *train* (entraînement), on juge sur la partie *test* jamais vue. Jamais de mélange aléatoire : le futur ne doit pas servir à prédire le passé.
 *Ex. : 70/30 sur 2021-2026 → train 2021-01 à 2025-01, test 2025-01 à 2026-10.*
+
+**Suivi de tendance (*trend following*)** [3]
+Famille de stratégies qui achètent ce qui monte et sortent de ce qui baisse (moyennes mobiles, Donchian). Peu de trades gagnants, mais quelques très gros gains. Leur intérêt principal : réduire les grosses chutes.
+*Ex. : win rate de 21 %, mais max drawdown −36 % au lieu de −67 % pour le buy & hold.*
+
+**Témoin aléatoire (percentile)** [3]
+On simule 100 stratégies au hasard avec la même exposition et la même durée moyenne de position, et on regarde quelle part d'entre elles la vraie stratégie bat. Sous ~90 %, rien ne prouve qu'elle fait mieux qu'un tirage au sort.
+*Ex. : « bat 50 % » = exactement aussi bonne qu'une stratégie au hasard qui serait investie aussi souvent.*
+
+**Tests multiples** [3]
+Plus on teste de stratégies, plus l'une d'elles finit par paraître « significative » par chance. Avec 9 essais indépendants au seuil de 90 %, on a ~61 % de chances qu'au moins un passe par hasard.
+*Ex. : 3 stratégies × 3 timeframes = 9 essais ; le meilleur à 89 % n'a rien d'étonnant.*
 
 **Testnet / démo** [0]
 Version de l'exchange avec de l'argent fictif, pour tester un bot en conditions quasi réelles sans risque.

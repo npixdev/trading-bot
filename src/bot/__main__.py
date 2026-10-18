@@ -12,10 +12,12 @@ from typing import Any
 import pandas as pd
 
 from bot.backtest import run_backtest, train_test_split, walk_forward
-from bot.backtest.metrics import Metrics, compute_metrics, metrics_table
+from bot.backtest.metrics import Metrics, metrics_table
 from bot.config import DEFAULT_CONFIG_PATH, BacktestConfig, load_config
 from bot.data import cache_path, create_exchange, find_gaps, load_cache, update_ohlcv
 from bot.data.quality import find_invalid_rows
+from bot.data.resample import resample_ohlcv
+from bot.report import run_comparison, verdict, write_report
 from bot.strategies import STRATEGIES, BuyAndHold
 
 
@@ -97,6 +99,8 @@ def _load_market(args: argparse.Namespace) -> pd.DataFrame:
     df = load_cache(path)
     if df is None or df.empty:
         raise SystemExit(f"Pas de cache : {path}. Lance d'abord `python -m bot fetch`.")
+    if getattr(args, "resample", None):
+        df = resample_ohlcv(df, args.resample)
     return df.loc[args.start : args.end]
 
 
@@ -150,17 +154,40 @@ def cmd_walkforward(args: argparse.Namespace) -> None:
         print(table.to_string(index=False, float_format=lambda x: f"{x:.2f}"))
 
     start, end = wf.equity.index[0], wf.equity.index[-1]
-    trades = pd.concat([t.trades for t in wf.tests], ignore_index=True)
-    position = pd.concat([t.position for t in wf.tests])
-    fees = sum(t.fees_paid for t in wf.tests)
     results = {
-        "walk-forward (hors échantillon)": compute_metrics(
-            wf.equity, costs.initial_cash, trades, position, fees
-        ),
+        "walk-forward (hors échantillon)": wf.metrics,
         "buy&hold (même période)": run_backtest(df, BuyAndHold(), costs, start, end).metrics,
     }
     print()
     _print_table(results)
+
+
+def cmd_compare(args: argparse.Namespace) -> None:
+    args.start = args.end = None
+    df = _load_market(args)
+    costs = _costs(args, load_config(DEFAULT_CONFIG_PATH).backtest)
+    strategies = [STRATEGIES[name] for name in args.strategies.split(",")]
+    timeframes = args.timeframes.split(",")
+    sections = run_comparison(
+        df, timeframes, strategies, costs, args.train, args.test, n_seeds=args.seeds
+    )
+    for s in sections:
+        bh = s.buy_hold.metrics
+        print(f"\n=== {s.timeframe} : hors échantillon {s.buy_hold.equity.index[0]:%Y-%m-%d} → "
+              f"{s.buy_hold.equity.index[-1]:%Y-%m-%d} ===")
+        _print_table({"buy&hold": bh, **{o.name: o.metrics for o in s.outcomes}})
+        for o in s.outcomes:
+            pct = o.random_percentiles()
+            beat = "n/a" if pct is None else f"{pct[1]:.0%}"
+            print(f"  {o.name:<10} bat {beat} des stratégies aléatoires → {verdict(o, bh)}")
+
+    subtitle = (
+        f"{args.exchange} {args.symbol}, walk-forward train {args.train} / test {args.test}, "
+        f"frais {costs.fee:.2%} + slippage {costs.slippage:.2%} par ordre"
+    )
+    stamp = pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
+    path = write_report(sections, args.reports_dir / f"compare_{stamp}.html", subtitle)
+    print(f"\nRapport : {path.resolve()}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -189,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add_backtest_args(p: argparse.ArgumentParser) -> None:
         add_market_args(p)
         p.add_argument("--strategy", choices=sorted(STRATEGIES), required=True)
+        p.add_argument("--resample", default=None, help="Agrège les bougies, ex. 4h ou 1d")
         p.add_argument("--start", default=None, help="Début de la période (UTC)")
         p.add_argument("--end", default=None, help="Fin de la période (UTC, incluse)")
         p.add_argument("--fee", type=float, default=None, help=f"défaut : {app_cfg.backtest.fee}")
@@ -208,6 +236,18 @@ def build_parser() -> argparse.ArgumentParser:
     wf.add_argument("--metric", default="sharpe", choices=["sharpe", "sortino", "total_return", "cagr"])
     wf.add_argument("--anchored", action="store_true")
     wf.set_defaults(func=cmd_walkforward)
+
+    cmp = sub.add_parser("compare", help="Compare des stratégies hors échantillon + rapport HTML")
+    add_market_args(cmp)
+    cmp.add_argument("--strategies", default="sma,donchian,bollinger")
+    cmp.add_argument("--timeframes", default="1h,4h,1d", help="Agrégés depuis --timeframe")
+    cmp.add_argument("--train", default="365D", help="Durée d'entraînement par fenêtre")
+    cmp.add_argument("--test", default="91D", help="Durée de test par fenêtre")
+    cmp.add_argument("--seeds", type=int, default=100, help="Nombre de stratégies aléatoires témoins")
+    cmp.add_argument("--fee", type=float, default=None)
+    cmp.add_argument("--slippage", type=float, default=None)
+    cmp.add_argument("--reports-dir", type=Path, default=Path("reports"))
+    cmp.set_defaults(func=cmd_compare)
     return parser
 
 
