@@ -1,14 +1,14 @@
-# Secrets — ne jamais committer
+﻿# Secrets — ne jamais committer
 .env
 .env.*
 !.env.example
 
-# Données et sorties générées
-data/
-reports/
+# Données et sorties générées (à la racine uniquement : src/bot/data est du code)
+/data/
+/reports/
 *.sqlite
 *.db
-logs/
+/logs/
 
 # Python
 __pycache__/
