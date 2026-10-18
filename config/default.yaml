@@ -1,0 +1,16 @@
+# Configuration par défaut. Les options de la ligne de commande la surchargent.
+# Aucune clé API ici : elles vont dans .env (voir .env.example).
+
+data:
+  # Source de l'historique : Binance a l'historique BTC/USDT le plus long et le plus liquide.
+  # Données publiques, aucun compte nécessaire.
+  exchange: binance
+  symbol: BTC/USDT
+  timeframe: 1h
+  since: "2021-01-01"
+  dir: data
+
+trading:
+  # Exchange utilisé pour paper/testnet/live (étapes 5+). OKX : agréé MiCA, mode démo via ccxt.
+  exchange: okx
+  symbol: BTC/USDC

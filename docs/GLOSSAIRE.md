@@ -25,6 +25,14 @@ Dans la paire `BTC/EUR`, BTC est la **base** (ce que tu achètes), EUR la **quot
 Prix auquel un acheteur est prêt à acheter. Le « meilleur bid » est le plus haut.
 *Ex. : meilleur bid à 60 000 € → si tu vends au marché, tu obtiens au mieux 60 000 €.*
 
+**Bougie (*candle*)** [1]
+Résumé des prix sur une période fixe (le *timeframe*) : ouverture, plus haut, plus bas, clôture, volume. Voir *OHLCV*.
+*Ex. : bougie BTC/USDT 1h du 2021-01-01 01:00 UTC : O=28 995, H=29 470, L=28 960, C=29 410 → le BTC a pris +1,4 % en une heure.*
+
+**Bougie non clôturée** [1]
+La bougie en cours : sa clôture, son plus haut et son plus bas peuvent encore changer. L'utiliser dans une décision revient à regarder le futur (look-ahead). Notre fetcher l'écarte toujours.
+*Ex. : à 21h45, la bougie de 21h00 indique « close = 80 960 », mais à 22h00 elle pourrait clôturer à 80 500.*
+
 **Buy & hold** [0]
 Acheter et garder, sans rien faire. C'est **la référence** que toute stratégie doit battre (en rendement ou en risque).
 *Ex. : 10 000 € de BTC achetés début 2023 à ~16 500 $ valaient plusieurs fois plus fin 2024. Un bot qui a fait +40 % sur la même période a « gagné », mais a fait bien pire que ne rien faire.*
@@ -40,12 +48,20 @@ Liste en temps réel des ordres d'achat (bids) et de vente (asks) en attente, cl
 **CEX** : exchange centralisé, une entreprise garde tes fonds (Kraken, OKX…). **DEX** : exchange décentralisé sur blockchain (Uniswap).
 *Ex. : FTX (CEX) a fait faillite en 2022 avec ~8 Md$ de fonds clients manquants.*
 
+**Drawdown (chute depuis un sommet)** [1]
+Perte, en %, entre le plus haut atteint et le point actuel. Le *max drawdown* est la pire de ces chutes : c'est la douleur maximale qu'il aurait fallu encaisser.
+*Ex. : BTC à 68 634 $ en novembre 2021, puis à ~15 800 $ en novembre 2022 → drawdown de −77 %. 10 000 € investis au sommet n'en valaient plus que 2 300.*
+
 **Exchange** [0]
 Plateforme où l'on échange des cryptos contre d'autres cryptos ou des euros.
 
 **Frais maker / taker** [0]
 **Taker** : ton ordre s'exécute immédiatement contre un ordre existant (il *prend* de la liquidité) → frais plus élevés. **Maker** : ton ordre attend dans le carnet (il *ajoute* de la liquidité) → frais plus bas.
 *Ex. : Kraken ~0,25 % maker / 0,40 % taker. Sur 1 000 € : 2,50 € en maker, 4 € en taker.*
+
+**Gap (trou de données)** [1]
+Bougies absentes de l'historique, en général pendant une maintenance de l'exchange. On ne les invente pas, mais il faut les connaître : un indicateur « sur 20 bougies » couvrira alors plus de 20 heures.
+*Ex. : Binance, 13 août 2021 : 4 bougies 1h manquantes entre 01:00 et 06:00 UTC.*
 
 **Futures / perpétuels** [0]
 Contrats qui suivent le prix d'une crypto sans la posséder, généralement avec levier. **Interdits dans ce projet** jusqu'à nouvel ordre.
@@ -71,6 +87,10 @@ Emprunter auprès de l'exchange pour acheter plus que ce qu'on a. Forme de levie
 **Matching engine (moteur d'appariement)** [0]
 Le programme de l'exchange qui fait se rencontrer les ordres d'achat et de vente compatibles.
 
+**OHLCV** [1]
+**O**pen (premier prix de la période), **H**igh (plus haut), **L**ow (plus bas), **C**lose (dernier prix), **V**olume (quantité échangée, en unité de base). Format standard des données historiques.
+*Ex. : O=80 880, H=80 998, L=80 684, C=80 963, V=669 → sur cette heure le BTC a oscillé dans 314 $ de large, fini en hausse de 0,1 %, et 669 BTC (~54 M$) ont été échangés.*
+
 **Ordre limit** [0]
 Ordre à un prix maximum (achat) ou minimum (vente). Prix garanti, exécution non garantie.
 *Ex. : BTC à 60 000 €, tu places un achat limit à 59 500 €. Si le prix ne descend jamais à 59 500 €, rien ne se passe.*
@@ -94,12 +114,20 @@ Ordre dormant qui se déclenche quand le prix atteint un seuil, pour couper une 
 Stop qui, une fois déclenché, place un ordre limit au lieu d'un market. Risque : ne pas être exécuté si le prix chute trop vite.
 *Ex. : stop 57 000 €, limit 56 900 €. Le BTC passe de 57 100 € à 55 000 € en une minute → ton ordre à 56 900 € n'est jamais rempli, tu es toujours en position et ta perte continue.*
 
+**Pagination** [1]
+L'API ne renvoie qu'un nombre limité de bougies par requête (~1 000 sur Binance, 100 à 300 sur OKX). Pour tout l'historique, on enchaîne les requêtes en avançant le point de départ.
+*Ex. : 2021-01-01 → 2026-10-18 en 1h ≈ 50 800 bougies ≈ 51 requêtes sur Binance.*
+
 **Paire** [0]
 Les deux actifs échangés, notés `BASE/QUOTE`. Voir *Base / Quote*.
 
 **Profondeur (*depth*)** [0]
 Quantité disponible dans le carnet à chaque niveau de prix.
 *Ex. : 0,5 BTC au meilleur ask, 1,2 BTC au niveau suivant → acheter 1 BTC « mange » deux niveaux.*
+
+**Rate limit (limite de débit)** [1]
+Nombre maximum de requêtes autorisées par l'exchange sur une période. Au-delà : erreur, puis bannissement temporaire de ton IP ou de ta clé. ccxt espace automatiquement les requêtes (`enableRateLimit`).
+*Ex. : si l'exchange autorise ~20 requêtes/s et que ton bot en envoie 100 d'un coup, il peut être bloqué plusieurs minutes, au pire moment (pendant un krach).*
 
 **Slippage (glissement)** [0]
 Écart entre le prix attendu et le prix réellement obtenu.
@@ -123,6 +151,10 @@ Ajuster une stratégie si précisément au passé qu'elle capture du bruit (du h
 
 **Testnet / démo** [0]
 Version de l'exchange avec de l'argent fictif, pour tester un bot en conditions quasi réelles sans risque.
+
+**Timeframe (unité de temps)** [1]
+Durée d'une bougie : 1m, 5m, 1h, 4h, 1d… Plus il est court, plus il y a de bruit, de trades potentiels et donc de frais.
+*Ex. : un an = 525 600 bougies 1m, 8 760 bougies 1h, 365 bougies 1d.*
 
 **USDT / USDC** [0]
 Les deux principaux stablecoins en dollars. En Europe, USDT est restreint sur la plupart des plateformes agréées MiCA ; USDC y est disponible.
