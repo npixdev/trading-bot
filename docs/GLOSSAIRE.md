@@ -17,6 +17,10 @@ Interface qui permet à un programme de parler à l'exchange. Une clé API = un 
 Prix auquel un vendeur est prêt à vendre. Le « meilleur ask » est le plus bas.
 *Ex. : meilleur ask à 60 010 € → c'est le prix minimum que tu paieras en achetant au marché.*
 
+**ATR (*Average True Range*)** [4]
+Amplitude moyenne d'une bougie sur les N dernières (gaps compris). Mesure de la volatilité en unités de prix, utilisée pour placer les stops et dimensionner les positions.
+*Ex. : BTC à 80 000 avec un ATR journalier de 2 400 → une journée « normale » fait bouger le prix d'environ 3 %.*
+
 **Backtest** [2]
 Simulation d'une stratégie sur des données passées, bougie par bougie, avec frais et slippage. Toujours plus optimiste que la réalité : c'est un filtre pour éliminer les mauvaises idées, pas une promesse.
 *Ex. : une stratégie qui fait −57 % en backtest fera presque sûrement pire en réel. Une qui fait +800 % doit d'abord être soupçonnée.*
@@ -83,12 +87,20 @@ Part du temps (ou du capital) investie en crypto. Moins on est exposé, moins on
 **Taker** : ton ordre s'exécute immédiatement contre un ordre existant (il *prend* de la liquidité) → frais plus élevés. **Maker** : ton ordre attend dans le carnet (il *ajoute* de la liquidité) → frais plus bas.
 *Ex. : Kraken ~0,25 % maker / 0,40 % taker. Sur 1 000 € : 2,50 € en maker, 4 € en taker.*
 
+**Gap de prix** [4]
+Saut de prix entre la clôture d'une bougie et l'ouverture de la suivante, sans transaction entre les deux. Un stop traversé par un gap s'exécute plus bas que prévu.
+*Ex. : stop à 90, la bougie ouvre à 70 → vente à 70, perte de 30 % au lieu des 10 % prévus.*
+
 **Gap (trou de données)** [1]
 Bougies absentes de l'historique, en général pendant une maintenance de l'exchange. On ne les invente pas, mais il faut les connaître : un indicateur « sur 20 bougies » couvrira alors plus de 20 heures.
 *Ex. : Binance, 13 août 2021 : 4 bougies 1h manquantes entre 01:00 et 06:00 UTC.*
 
 **Futures / perpétuels** [0]
 Contrats qui suivent le prix d'une crypto sans la posséder, généralement avec levier. **Interdits dans ce projet** jusqu'à nouvel ordre.
+
+**Kill switch (coupe-circuit)** [4]
+Arrêt définitif du bot quand sa perte depuis son plus haut dépasse un seuil. Protège contre un bug ou une stratégie cassée ; ne se réarme qu'à la main, après analyse.
+*Ex. : seuil −30 %, capital passé de 10 000 à 6 900 → tout est vendu, plus aucun ordre.*
 
 **Levier** [0]
 Multiplier son exposition avec de l'argent emprunté. Multiplie les gains **et** les pertes.
@@ -109,6 +121,10 @@ Données qui n'ont **pas** servi à choisir la stratégie ou ses paramètres. Se
 **Moyenne mobile (SMA) / croisement** [3]
 Moyenne des N derniers prix de clôture, recalculée à chaque bougie : une version lissée du prix. Le « croisement » compare une moyenne courte (réactive) à une longue (lente).
 *Ex. : SMA 50 jours = 82 000, SMA 200 jours = 75 000 → la courte est au-dessus : tendance haussière, on est investi.*
+
+**Limite de perte journalière** [4]
+Si le portefeuille perd plus de X % depuis minuit UTC, on vend tout et on ne trade plus jusqu'au lendemain.
+*Ex. : 13/06/2022, BTC −15,4 % sur la journée ; avec une limite à 5 %, la perte du jour est restée à −5,3 %.*
 
 **Liquidation** [0]
 Fermeture forcée d'une position à effet de levier quand ta mise ne couvre plus les pertes. Tu perds tout ce que tu avais mis.
@@ -177,6 +193,10 @@ Nombre maximum de requêtes autorisées par l'exchange sur une période. Au-del�
 Pari qu'un prix qui s'est beaucoup éloigné de sa moyenne va y revenir. Gagne souvent un peu, perd parfois beaucoup (quand la chute continue).
 *Ex. : win rate de 72 % mais rendement total −32 % en 4h : beaucoup de petits gains, quelques grosses pertes.*
 
+**Risque par trade** [4]
+Part du capital qu'on accepte de perdre si le stop est touché. Sert à calculer la taille de position : taille = risque ÷ distance du stop.
+*Ex. : capital 10 000, risque 1 % = 100 €, stop 6 % sous l'entrée → on achète 100 / 0,06 ≈ 1 667 € de BTC.*
+
 **RSI (*Relative Strength Index*)** [3]
 Indicateur entre 0 et 100 qui compare les hausses récentes aux baisses récentes. < 30 = « survendu » (beaucoup de baisses), > 70 = « suracheté ».
 *Ex. : sur 14 bougies, gains moyens 100 $, pertes moyennes 300 $ → RS = 1/3 → RSI = 100 − 100/(1 + 1/3) = 25 : survendu.*
@@ -213,6 +233,10 @@ Ajuster une stratégie si précisément au passé qu'elle capture du bruit (du h
 Découpage chronologique de l'historique : on choisit les paramètres sur la partie *train* (entraînement), on juge sur la partie *test* jamais vue. Jamais de mélange aléatoire : le futur ne doit pas servir à prédire le passé.
 *Ex. : 70/30 sur 2021-2026 → train 2021-01 à 2025-01, test 2025-01 à 2026-10.*
 
+**Stop-loss dans le bot** [4]
+Prix de sortie fixé à l'entrée (ici en multiple d'ATR ou en %), vérifié pendant chaque bougie. Après un stop, le bot ne rachète pas tant que la stratégie n'est pas d'abord repassée à 0.
+*Ex. : entrée à 80 000, ATR 2 000, stop à 3 ATR → sortie automatique à 74 000 (−7,5 %).*
+
 **Suivi de tendance (*trend following*)** [3]
 Famille de stratégies qui achètent ce qui monte et sortent de ce qui baisse (moyennes mobiles, Donchian). Peu de trades gagnants, mais quelques très gros gains. Leur intérêt principal : réduire les grosses chutes.
 *Ex. : win rate de 21 %, mais max drawdown −36 % au lieu de −67 % pour le buy & hold.*
@@ -224,6 +248,10 @@ On simule 100 stratégies au hasard avec la même exposition et la même durée 
 **Tests multiples** [3]
 Plus on teste de stratégies, plus l'une d'elles finit par paraître « significative » par chance. Avec 9 essais indépendants au seuil de 90 %, on a ~61 % de chances qu'au moins un passe par hasard.
 *Ex. : 3 stratégies × 3 timeframes = 9 essais ; le meilleur à 89 % n'a rien d'étonnant.*
+
+**Taille de position (*sizing*)** [4]
+Combien acheter à chaque entrée. En % fixe du capital, ou calculée à partir du risque par trade et de la volatilité (ATR) : plus le marché est agité, plus la position est petite.
+*Ex. : SMA 1d avec 1 % de risque → positions entre 6 % et 16 % du capital au lieu de 100 %.*
 
 **Testnet / démo** [0]
 Version de l'exchange avec de l'argent fictif, pour tester un bot en conditions quasi réelles sans risque.
@@ -238,6 +266,10 @@ Les deux principaux stablecoins en dollars. En Europe, USDT est restreint sur la
 **Walk-forward** [2]
 Répéter train/test en glissant dans le temps : optimiser sur 1 an, tester sur les 3 mois suivants, avancer de 3 mois, recommencer. Les périodes de test mises bout à bout forment une performance hors échantillon sur plusieurs régimes de marché.
 *Ex. : 2021-2026 avec train 1 an / test 3 mois → 20 fenêtres de test, de janv. 2022 à oct. 2026.*
+
+**Whipsaw (aller-retour perdant)** [4]
+Vendre après une baisse, puis racheter plus haut quand le prix rebondit. Chaque aller-retour coûte la baisse encaissée plus les frais.
+*Ex. : limite journalière sur un buy & hold BTC 1h : 141 ventes forcées puis rachats le lendemain → +24 % au lieu de +179 %.*
 
 **Win rate (taux de réussite)** [2]
 Part des trades clôturés gagnants. Seul, il ne veut rien dire : on peut gagner 90 % du temps et perdre de l'argent si les 10 % de pertes sont énormes.

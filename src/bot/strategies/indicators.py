@@ -28,6 +28,16 @@ def rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return out.where(loss != 0, 100.0).where(gain.notna())
 
 
+def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range de Wilder : amplitude moyenne d'une bougie, gaps compris."""
+    prev_close = df["close"].shift(1)
+    true_range = pd.concat(
+        [df["high"] - df["low"], (df["high"] - prev_close).abs(), (df["low"] - prev_close).abs()], axis=1
+    ).max(axis=1)
+    true_range.iloc[0] = df["high"].iloc[0] - df["low"].iloc[0]
+    return true_range.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+
+
 def donchian(high: pd.Series, low: pd.Series, window: int) -> tuple[pd.Series, pd.Series]:
     """(plus haut, plus bas) des `window` bougies **précédentes** (la bougie courante exclue)."""
     upper = high.rolling(window, min_periods=window).max().shift(1)

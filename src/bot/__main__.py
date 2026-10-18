@@ -13,7 +13,7 @@ import pandas as pd
 
 from bot.backtest import run_backtest, train_test_split, walk_forward
 from bot.backtest.metrics import Metrics, metrics_table
-from bot.config import DEFAULT_CONFIG_PATH, BacktestConfig, load_config
+from bot.config import DEFAULT_CONFIG_PATH, BacktestConfig, RiskConfig, load_config
 from bot.data import cache_path, create_exchange, find_gaps, load_cache, update_ohlcv
 from bot.data.quality import find_invalid_rows
 from bot.data.resample import resample_ohlcv
@@ -130,11 +130,34 @@ def cmd_backtest(args: argparse.Namespace) -> None:
             f"train ({train.index[0]:%Y-%m}→{train.index[-1]:%Y-%m})": (train.index[0], train.index[-1]),
             f"test ({test.index[0]:%Y-%m}→{test.index[-1]:%Y-%m})": (test.index[0], test.index[-1]),
         }
+    risk = _risk_config(args) if args.risk else None
     results: dict[str, Metrics] = {}
+    risky_runs = []
     for label, (start, end) in periods.items():
         results[f"{strategy.name} {label}"] = run_backtest(df, strategy, costs, start, end).metrics
+        if risk is not None:
+            run = run_backtest(df, strategy, costs, start, end, risk=risk)
+            results[f"{strategy.name}+risque {label}"] = run.metrics
+            risky_runs.append((label, run))
         results[f"buy&hold {label}"] = run_backtest(df, BuyAndHold(), costs, start, end).metrics
     _print_table(results)
+    for label, run in risky_runs:
+        _print_risk_events(label, run.events)
+
+
+def _risk_config(args: argparse.Namespace) -> RiskConfig:
+    return replace(load_config(DEFAULT_CONFIG_PATH).risk, **_parse_params(args.risk_param))
+
+
+def _print_risk_events(label: str, events: pd.DataFrame) -> None:
+    counts = events["kind"].value_counts().to_dict() if len(events) else {}
+    print(f"\nGarde-fous déclenchés ({label}) : {counts or 'aucun'}")
+    for kind in ("kill_switch", "daily_limit", "stop"):
+        subset = events[events["kind"] == kind]
+        for row in subset.head(3).itertuples():
+            print(f"  {row.time:%Y-%m-%d %H:%M}  {kind:<12} {row.detail}")
+        if len(subset) > 3:
+            print(f"  … et {len(subset) - 3} autre(s) {kind}")
 
 
 def cmd_walkforward(args: argparse.Namespace) -> None:
@@ -226,6 +249,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_backtest_args(bt)
     bt.add_argument("--param", action="append", default=[], help="Paramètre, ex. avg_hold_bars=24")
     bt.add_argument("--split", type=float, default=None, help="Part train, ex. 0.7 → train/test")
+    bt.add_argument("--risk", action="store_true", help="Ajoute un run avec les garde-fous (section risk du YAML)")
+    bt.add_argument(
+        "--risk-param", action="append", default=[], help="Surcharge un garde-fou, ex. stop_atr_mult=2 ou daily_loss_limit=None"
+    )
     bt.set_defaults(func=cmd_backtest)
 
     wf = sub.add_parser("walkforward", help="Optimisation sur train, évaluation hors échantillon")
