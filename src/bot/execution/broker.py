@@ -97,7 +97,7 @@ FINAL_STATUSES = ("closed", "canceled", "expired", "rejected")
 
 
 class ExchangeBroker:
-    """Ordres réels via ccxt : limit IOC à prix plafonné, mode `cash` (spot, sans marge).
+    """Ordres réels via ccxt : limit IOC à prix plafonné, sur le marché spot (sans marge).
 
     Le solde de l'exchange fait foi : il est relu avant et après chaque ordre.
     Le bot considère tout le BTC et l'USDC du compte comme les siens → utiliser un sous-compte dédié.
@@ -199,7 +199,9 @@ class ExchangeBroker:
     def _place(self, now: pd.Timestamp, side: str, amount: float, limit_price: float) -> ExecutionResult:
         cid = self._client_id(now)
         price = float(self.exchange.price_to_precision(self.symbol, limit_price))
-        params = {"timeInForce": "IOC", "tdMode": "cash", "clientOrderId": cid}
+        params: dict[str, Any] = {"timeInForce": "IOC", "clientOrderId": cid}
+        if self.exchange.id == "okx":
+            params["tdMode"] = "cash"  # OKX : mode spot explicite (sans ce paramètre, Binance rejetterait l'ordre)
         events: list[tuple[str, str]] = []
         try:
             order = self.exchange.create_order(self.symbol, "limit", side, amount, price, params)

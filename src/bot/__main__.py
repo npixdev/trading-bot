@@ -277,7 +277,11 @@ def cmd_paper(args: argparse.Namespace) -> None:
 def _connect(args: argparse.Namespace, live: bool):  # noqa: ANN202
     """Connexion authentifiée + contrôles de sécurité. Ne passe aucun ordre."""
     app = load_config(DEFAULT_CONFIG_PATH)
-    exchange_name, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
+    if live:
+        exchange_name, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
+    else:
+        exchange_name = args.exchange or app.execution.testnet_exchange
+        symbol = args.symbol or app.execution.testnet_symbol
     sandbox = not live
     try:
         keys = load_api_keys(exchange_name, sandbox=sandbox)

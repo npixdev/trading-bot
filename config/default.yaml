@@ -43,7 +43,11 @@ paper:
 execution:
   # Ordres réels : testnet par défaut, live uniquement avec --live + confirmation au clavier.
   # Stratégie, timeframe et garde-fous : ceux de la section paper.
-  max_capital: 100          # USDC max gérés par le bot (le reste du compte est ignoré pour le sizing)
+  # Testnet : Binance spot testnet (testnet.binance.vision), fonds fictifs, sans compte Binance ni KYC.
+  # Live : trading.exchange / trading.symbol (OKX). Les prix du testnet viennent de son propre carnet.
+  testnet_exchange: binance
+  testnet_symbol: BTC/USDT
+  max_capital: 100         # USDC max gérés par le bot (le reste du compte est ignoré pour le sizing)
   max_slippage: 0.002       # ordres limit IOC plafonnés à ask + 0,2 % (achat) / bid − 0,2 % (vente)
   order_timeout: 15
   testnet_db: data/testnet.sqlite

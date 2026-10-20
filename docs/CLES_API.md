@@ -13,7 +13,27 @@
 
 ---
 
-## Étape A — Clés du mode démo (testnet) : à faire maintenant
+## Étape A — Testnet spot Binance (recommandé : sans compte Binance ni KYC)
+
+Le testnet spot de Binance est un environnement séparé, avec des fonds fictifs : aucune pièce d'identité, aucun argent réel possible. Son carnet d'ordres est distinct du vrai marché (prix proches mais différents, liquidité parfois étrange) : on y teste la **mécanique** des ordres, pas la performance.
+
+1. Va sur **https://testnet.binance.vision** et connecte-toi avec la méthode proposée (historiquement un compte GitHub ; vérifie ce que le site demande, il ne doit pas réclamer de pièce d'identité).
+2. *Generate HMAC_SHA256 Key* (clé « HMAC » : la plus simple ; l'option Ed25519 marche aussi mais demande de générer une paire de clés soi-même). Donne-lui un nom, par ex. `trading-bot`.
+3. Copie l'**API Key** et le **Secret Key** (le secret n'est affiché qu'une fois) dans `.env` (crée-le à partir de `.env.example`) :
+   ```
+   BINANCE_DEMO_API_KEY=...
+   BINANCE_DEMO_API_SECRET=...
+   ```
+4. Le compte testnet est crédité automatiquement en fonds fictifs (USDT, BTC…), réinitialisés périodiquement par Binance.
+5. Vérifie, sans passer d'ordre :
+   ```
+   .\.venv\Scripts\python.exe -m bot check-keys
+   ```
+   Tu dois voir tes soldes fictifs et les minimums du marché (≈ 0,00001 BTC et 5 USDT par ordre).
+
+Les clés du testnet ne fonctionnent pas sur le vrai Binance, et inversement.
+
+## Étape A bis — Mode démo OKX (alternative, nécessite un compte OKX donc un KYC)
 
 Le mode démo d'OKX utilise de faux fonds mais le vrai moteur de l'exchange : les ordres sont réellement envoyés, exécutés ou rejetés.
 
@@ -34,7 +54,7 @@ Le mode démo d'OKX utilise de faux fonds mais le vrai moteur de l'exchange : le
 6. Approvisionne le compte démo en USDC fictifs si besoin (OKX propose de réinitialiser/recharger les fonds démo).
 7. Vérifie, sans passer d'ordre :
    ```
-   .\.venv\Scripts\python.exe -m bot check-keys
+   .\.venv\Scripts\python.exe -m bot check-keys --exchange okx --symbol BTC/USDC
    ```
    Tu dois voir : permissions `read_only,trade` (sans `withdraw`), tes soldes démo, les minimums du marché et **tes vrais frais**.
 

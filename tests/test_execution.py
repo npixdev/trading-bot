@@ -127,6 +127,15 @@ def test_buy_is_spot_ioc_limit_capped_at_ask_plus_slippage() -> None:
     assert res.done and len(res.orders) == 1
 
 
+def test_binance_orders_do_not_carry_okx_parameters() -> None:
+    ex = FakePrivateExchange(usdc=1_000.0)
+    ex.id = "binance"
+    _broker(ex).rebalance(NOW, QUOTE, 1.0, "signal")
+    params = ex.created[0]["params"]
+    assert "tdMode" not in params  # Binance rejetterait un paramètre inconnu
+    assert params["timeInForce"] == "IOC" and params["clientOrderId"].startswith("bot")
+
+
 def test_sell_everything_at_bid_minus_slippage() -> None:
     ex = FakePrivateExchange(usdc=0.0, btc=0.01234567)
     res = _broker(ex).rebalance(NOW, QUOTE, 0.0, "signal")
@@ -264,6 +273,42 @@ def test_permission_report_detects_withdraw_and_ip() -> None:
     assert safe.safe and safe.ip_restricted
     unsafe = check_api_permissions(FakePrivateExchange(perm="read_only,trade,withdraw", ip=""))
     assert unsafe.can_withdraw and not unsafe.safe and not unsafe.ip_restricted
+
+
+class FakeBinance(FakePrivateExchange):
+    id = "binance"
+
+    def __init__(self, sandbox: bool, withdrawals: bool = False, ip: bool = True) -> None:
+        super().__init__()
+        self.isSandboxModeEnabled = sandbox
+        self.withdrawals, self.ip_flag = withdrawals, ip
+
+    def sapi_get_account_apirestrictions(self) -> dict:
+        return {"enableWithdrawals": self.withdrawals, "ipRestrict": self.ip_flag, "enableSpotAndMarginTrading": True}
+
+
+def test_binance_testnet_permissions_are_safe_by_construction() -> None:
+    report = check_api_permissions(FakeBinance(sandbox=True))
+    assert report.safe and "testnet" in report.detail
+
+
+def test_binance_live_permissions_detect_withdraw() -> None:
+    assert check_api_permissions(FakeBinance(sandbox=False, withdrawals=False)).safe
+    unsafe = check_api_permissions(FakeBinance(sandbox=False, withdrawals=True, ip=False))
+    assert unsafe.can_withdraw and not unsafe.ip_restricted
+
+
+def test_binance_sandbox_points_to_spot_testnet() -> None:
+    ex = create_private_exchange("binance", ApiKeys("k", "s"), sandbox=True)
+    assert ex.isSandboxModeEnabled
+    assert "testnet.binance.vision" in ex.urls["api"]["public"]
+
+
+def test_testnet_defaults_to_binance_without_kyc() -> None:
+    from bot.config import load_config
+
+    cfg = load_config().execution
+    assert (cfg.testnet_exchange, cfg.testnet_symbol) == ("binance", "BTC/USDT")
 
 
 def test_non_spot_market_is_refused() -> None:

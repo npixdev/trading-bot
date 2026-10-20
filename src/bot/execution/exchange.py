@@ -30,10 +30,8 @@ def load_api_keys(exchange: str, sandbox: bool, env_file: Path = Path(".env")) -
     prefix = env_prefix(exchange, sandbox)
     key, secret = os.getenv(f"{prefix}_KEY"), os.getenv(f"{prefix}_SECRET")
     if not key or not secret:
-        raise RuntimeError(
-            f"Clés absentes : renseigne {prefix}_KEY, {prefix}_SECRET (et {prefix}_PASSWORD pour OKX) "
-            f"dans {env_file.resolve()} — voir docs/CLES_API.md"
-        )
+        names = f"{prefix}_KEY, {prefix}_SECRET" + (f", {prefix}_PASSWORD (passphrase)" if exchange == "okx" else "")
+        raise RuntimeError(f"Clés absentes : renseigne {names} dans {env_file.resolve()} — voir docs/CLES_API.md")
     return ApiKeys(key, secret, os.getenv(f"{prefix}_PASSWORD") or None)
 
 
@@ -61,7 +59,24 @@ class PermissionReport:
 
 
 def check_api_permissions(exchange: ccxt.Exchange) -> PermissionReport:
-    """Interroge l'exchange sur les droits de la clé. Implémenté pour OKX."""
+    """Interroge l'exchange sur les droits de la clé. Implémenté pour OKX et Binance."""
+    sandbox = bool(getattr(exchange, "isSandboxModeEnabled", False))
+    if exchange.id == "binance":
+        if sandbox:
+            # Le testnet spot n'expose que l'API /api/v3 (trading) : pas d'API de retrait, fonds fictifs.
+            return PermissionReport(
+                can_withdraw=False, ip_restricted=None,
+                detail="testnet spot Binance : pas d'API de retrait (fonds fictifs)",
+            )
+        data = exchange.sapi_get_account_apirestrictions()
+        withdraw = str(data.get("enableWithdrawals")).lower() == "true"
+        ip = str(data.get("ipRestrict")).lower() == "true"
+        trading = str(data.get("enableSpotAndMarginTrading")).lower() == "true"
+        return PermissionReport(
+            can_withdraw=withdraw, ip_restricted=ip,
+            detail=f"trading spot : {'oui' if trading else 'non'} ; retrait : {'OUI' if withdraw else 'non'} ; "
+            f"restriction IP : {'oui' if ip else 'non'}",
+        )
     if exchange.id == "okx":
         data = exchange.private_get_account_config()["data"][0]
         perms = str(data.get("perm", ""))

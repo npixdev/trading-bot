@@ -92,6 +92,8 @@ class PaperConfig:
 class ExecutionConfig:
     """Ordres réels (testnet puis live). Même stratégie/garde-fous que la section paper."""
 
+    testnet_exchange: str = "binance"  # testnet spot Binance : sans compte ni KYC
+    testnet_symbol: str = "BTC/USDT"
     max_capital: float = 100.0  # capital maximum géré par le bot, en devise de cotation (USDC)
     max_slippage: float = 0.002  # prix plafond des ordres IOC : ask + 0,2 % / bid − 0,2 %
     order_timeout: float = 15.0
