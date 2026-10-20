@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+data/
+reports/
+logs/
+.venv/
+venv/
+.git/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.sqlite

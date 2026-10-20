@@ -29,6 +29,10 @@ Simulation d'une stratégie sur des données passées, bougie par bougie, avec f
 Après une erreur réseau, attendre de plus en plus longtemps avant de réessayer, pour ne pas marteler un exchange en difficulté (et se faire bannir).
 *Ex. : vérification toutes les 10 s ; après 3 échecs : attentes de 20 s, 40 s, 80 s, puis reconnexion.*
 
+**Alerte limitée en fréquence (*throttling*)** [7]
+Au-delà d'une alerte par fenêtre de temps pour un même type d'événement, les suivantes sont regroupées. Évite d'être noyé de messages et de finir par ignorer les alertes importantes.
+*Ex. : panne de l'exchange, 50 erreurs réseau en 17 min → 1 message, puis « +49 similaire(s) » dans le suivant.*
+
 **Base / Quote** [0]
 Dans la paire `BTC/EUR`, BTC est la **base** (ce que tu achètes), EUR la **quote** (ce avec quoi tu paies).
 *Ex. : BTC/EUR = 60 000 → 1 BTC coûte 60 000 €.*
@@ -118,6 +122,10 @@ Arrêt définitif du bot quand sa perte depuis son plus haut dépasse un seuil. 
 Multiplier son exposition avec de l'argent emprunté. Multiplie les gains **et** les pertes.
 *Ex. : levier x10 avec 1 000 € → tu contrôles 10 000 € de BTC. Le BTC baisse de 10 % → −1 000 € → ta mise est entièrement perdue (liquidation).*
 
+**Docker / conteneur** [7]
+Un conteneur emballe le bot avec son Python et ses bibliothèques, isolé du reste de la machine : il tourne à l'identique sur ton PC et sur un serveur. `docker compose` décrit comment le lancer (mode, dossiers conservés, redémarrage automatique).
+*Ex. : `docker compose up -d paper` → le paper trading démarre en arrière-plan et redémarre seul après un crash ou un reboot du serveur.*
+
 **Écart-type** [3]
 Mesure de dispersion : de combien les valeurs s'écartent typiquement de leur moyenne. En trading, c'est la mesure standard de la volatilité.
 *Ex. : prix 98, 100, 102 → moyenne 100, écart-type ≈ 1,6. Prix 90, 100, 110 → écart-type ≈ 8,2 : beaucoup plus volatil.*
@@ -125,6 +133,10 @@ Mesure de dispersion : de combien les valeurs s'écartent typiquement de leur mo
 **Grille de paramètres** [3]
 L'ensemble des combinaisons testées lors de l'optimisation. Plus elle est grande, plus on risque de trouver une combinaison gagnante par pur hasard.
 *Ex. : fast ∈ {10, 20, 50} × slow ∈ {50, 100, 200} = 9 combinaisons (8 valides, car fast < slow).*
+
+**Heartbeat (battement de cœur)** [7]
+Le bot note l'heure à chaque tour de boucle. Un battement trop ancien signifie qu'il est bloqué ou arrêté, même s'il n'a pas planté.
+*Ex. : boucle toutes les 60 s ; dernier battement il y a 14 min → `health` renvoie une erreur et Docker marque le conteneur « unhealthy ».*
 
 **Hors échantillon (*out-of-sample*, OOS)** [2]
 Données qui n'ont **pas** servi à choisir la stratégie ou ses paramètres. Seule la performance hors échantillon a une valeur prédictive.
@@ -298,6 +310,10 @@ Durée d'une bougie : 1m, 5m, 1h, 4h, 1d… Plus il est court, plus il y a de br
 
 **USDT / USDC** [0]
 Les deux principaux stablecoins en dollars. En Europe, USDT est restreint sur la plupart des plateformes agréées MiCA ; USDC y est disponible.
+
+**VPS (serveur privé virtuel)** [7]
+Petit ordinateur loué chez un hébergeur, allumé 24 h/24, avec une adresse IP fixe. Permet au bot (et à son stop-loss logiciel) de tourner sans dépendre de ton PC.
+*Ex. : 1 processeur, 1 Go de RAM, ~5 €/mois : largement suffisant pour un bot qui décide une fois par jour.*
 
 **Walk-forward** [2]
 Répéter train/test en glissant dans le temps : optimiser sur 1 an, tester sur les 3 mois suivants, avancer de 3 mois, recommencer. Les périodes de test mises bout à bout forment une performance hors échantillon sur plusieurs régimes de marché.

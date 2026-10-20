@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -32,10 +36,17 @@ def _iso(t: pd.Timestamp) -> str:
     return pd.Timestamp(t).isoformat()
 
 
+Listener = Callable[[str, dict[str, Any]], None]
+
+
 class Store:
-    def __init__(self, path: Path) -> None:
+    """`listener(record, data)` est appelé après chaque ordre (« order ») et événement (« event ») :
+    c'est par là que passent les alertes. Une erreur du listener ne bloque jamais l'écriture."""
+
+    def __init__(self, path: Path, listener: Listener | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self.listener = listener
         self.conn = sqlite3.connect(path)
         self.conn.executescript(SCHEMA)
         self._migrate()
@@ -64,6 +75,24 @@ class Store:
             (json.dumps(state),),
         )
 
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM state WHERE key = ?", (f"meta:{key}",)).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (f"meta:{key}", json.dumps(value)),
+        )
+
+    def _notify(self, record: str, data: dict[str, Any]) -> None:
+        if self.listener is None:
+            return
+        try:
+            self.listener(record, data)
+        except Exception:  # noqa: BLE001 — une alerte ratée ne doit jamais casser le trading
+            log.exception("Erreur dans l'envoi d'une alerte (ignorée)")
+
     def commit(self) -> None:
         """Valide d'un bloc tout ce qui a été écrit depuis le dernier commit (état + journal)."""
         self.conn.commit()
@@ -87,6 +116,7 @@ class Store:
                 bid, ask, reason, order.get("id"), order.get("client_id"),
             ),
         )
+        self._notify("order", {**order, "reason": reason})
 
     def log_equity(self, time: pd.Timestamp, equity: float, cash: float, units: float, price: float) -> None:
         self.conn.execute(
@@ -100,6 +130,7 @@ class Store:
         )
         if commit:
             self.conn.commit()
+        self._notify("event", {"time": time, "kind": kind, "detail": detail})
 
     # --- Lecture -------------------------------------------------------------------------
 

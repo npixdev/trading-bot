@@ -13,6 +13,7 @@ dependencies = [
     "pyarrow>=15",
     "pyyaml>=6",
     "python-dotenv>=1",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]

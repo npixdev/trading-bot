@@ -14,18 +14,21 @@ from bot.realtime.store import Store
 
 log = logging.getLogger(__name__)
 
+HEARTBEAT_KEY = "heartbeat"  # lu par bot.monitoring.health (HEALTHCHECK Docker)
+
 RECONNECT_AFTER = 3  # échecs consécutifs avant de recréer la connexion
 MAX_BACKOFF_SECONDS = 300
 
 
 def run_loop(
-    trader,  # PaperTrader (non typé pour éviter un import circulaire)
+    trader,  # Trader (non typé pour éviter un import circulaire)
     feed,
     store: Store,
     poll_seconds: float,
     duration: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    on_step: Callable[[pd.Timestamp], None] | None = None,
 ) -> None:
     """Tourne jusqu'à `duration` secondes (None = indéfiniment) ou Ctrl+C.
 
@@ -41,6 +44,14 @@ def run_loop(
             try:
                 trader.step()
                 failures = 0
+                now = pd.Timestamp.now(tz="UTC")
+                store.set_meta(HEARTBEAT_KEY, now.isoformat())
+                store.commit()
+                if on_step is not None:
+                    try:
+                        on_step(now)
+                    except Exception:  # noqa: BLE001 — un résumé raté ne doit pas arrêter le trading
+                        log.exception("Erreur pendant le résumé quotidien (ignorée)")
                 sleep(poll_seconds)
             except (ccxt.NetworkError, ccxt.ExchangeNotAvailable) as exc:
                 failures += 1

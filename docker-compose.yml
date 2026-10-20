@@ -1,0 +1,42 @@
+# Faire tourner le bot 24/7 :  docker compose up -d paper      (ou : testnet)
+# Journaux SQLite dans ./data (conservés entre redémarrages), config en lecture seule.
+# Le mode RÉEL (--live) n'est volontairement PAS ici : il exige une confirmation tapée au clavier
+# et ne doit jamais démarrer sans surveillance.
+
+x-bot: &bot
+  build: .
+  image: trading-bot:latest
+  env_file: .env                      # clés testnet + Telegram ; jamais copiées dans l'image
+  volumes:
+    - ./data:/app/data
+    - ./config:/app/config:ro
+  restart: unless-stopped             # relancé après un crash ou un redémarrage du serveur
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }   # les logs ne remplissent pas le disque
+
+services:
+  paper:
+    <<: *bot
+    container_name: bot-paper
+    environment: { BOT_MODE: paper }
+    command: ["paper"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "bot", "health", "--mode", "paper", "--max-age", "600"]
+      interval: 2m
+      timeout: 20s
+      start_period: 5m
+      retries: 3
+
+  testnet:
+    <<: *bot
+    container_name: bot-testnet
+    profiles: ["testnet"]             # lancé seulement si demandé : docker compose --profile testnet up -d
+    environment: { BOT_MODE: testnet }
+    command: ["trade"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "bot", "health", "--mode", "testnet", "--max-age", "600"]
+      interval: 2m
+      timeout: 20s
+      start_period: 5m
+      retries: 3

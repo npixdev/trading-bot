@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import logging
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 import ccxt
 import pandas as pd
+from dotenv import load_dotenv
 
 from bot.backtest import run_backtest, train_test_split, walk_forward
 from bot.backtest.metrics import Metrics, metrics_table
@@ -28,6 +30,7 @@ from bot.execution import (
     load_api_keys,
 )
 from bot.execution.live_guard import confirm_live
+from bot.monitoring import Alerts, DailySummary, TelegramNotifier, check_health, notifier_from_env
 from bot.realtime import MarketFeed, Store, Trader, run_loop
 from bot.realtime.status import render, summarize
 from bot.realtime.trader import ConfigMismatch, make_identity
@@ -250,18 +253,55 @@ def _maybe_reset(db: Path, reset: bool) -> None:
 
 def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, db: Path, exchange: str,  # noqa: ANN001
                 symbol: str, timeframe: str) -> None:
-    store = Store(db)
+    notifier = notifier_from_env()
+    label = f"{mode.upper()} {exchange} {symbol} {timeframe}"
+    store = Store(db, listener=Alerts(notifier, label))
     try:
         identity = make_identity(mode, exchange, symbol, timeframe, strategy, risk)
         trader = Trader(feed, store, strategy, broker, risk, identity, warmup_bars=pc.warmup_bars)
     except ConfigMismatch as exc:
         store.close()
         raise SystemExit(str(exc)) from None
-    print(f"Journal : {db.resolve()}  |  Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
+    alerts_on = isinstance(notifier, TelegramNotifier)
+    print(f"Journal : {db.resolve()}  |  alertes Telegram : {'actives' if alerts_on else 'non configurées'}")
+    print("Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
+    daily = DailySummary(store, notifier, label)
     try:
-        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration)
+        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration, on_step=daily.maybe_send)
     finally:
         store.close()
+
+
+def cmd_test_alert(args: argparse.Namespace) -> None:
+    notifier = notifier_from_env()
+    if isinstance(notifier, TelegramNotifier):
+        ok = notifier.send("✅ Test d'alerte du bot de trading : la configuration Telegram fonctionne.")
+        raise SystemExit(0 if ok else "Échec de l'envoi : vérifie TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.")
+    load_dotenv(Path(".env"))
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise SystemExit("TELEGRAM_BOT_TOKEN absent de .env — voir README, section Alertes Telegram.")
+    chats = TelegramNotifier(token, "").find_chat_ids()
+    if not chats:
+        raise SystemExit("Aucune conversation trouvée : envoie d'abord un message (ex. « bonjour ») à ton bot sur Telegram.")
+    print("Conversations trouvées — copie l'identifiant voulu dans .env (TELEGRAM_CHAT_ID=...) :")
+    for chat_id, name in chats:
+        print(f"  {chat_id}  ({name})")
+
+
+def cmd_health(args: argparse.Namespace) -> None:
+    app = load_config(DEFAULT_CONFIG_PATH)
+    default = {"paper": app.paper.db, "testnet": app.execution.testnet_db, "live": app.execution.live_db}
+    db = args.db or default[args.mode]
+    if not db.exists():
+        raise SystemExit(f"KO : pas de journal {db}")
+    store = Store(db)
+    try:
+        ok, message = check_health(store, args.max_age)
+    finally:
+        store.close()
+    print(message)
+    raise SystemExit(0 if ok else 1)
 
 
 def cmd_paper(args: argparse.Namespace) -> None:
@@ -465,6 +505,15 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--live", action="store_true", help="vérifie les clés réelles au lieu des clés démo")
     check.add_argument("--max-capital", type=float, default=None)
     check.set_defaults(func=cmd_check_keys)
+
+    alert = sub.add_parser("test-alert", help="Envoie une alerte Telegram de test (ou aide à trouver TELEGRAM_CHAT_ID)")
+    alert.set_defaults(func=cmd_test_alert)
+
+    health = sub.add_parser("health", help="Code 0 si le bot est vivant (heartbeat récent), 1 sinon")
+    health.add_argument("--mode", choices=["paper", "testnet", "live"], default="paper")
+    health.add_argument("--db", type=Path, default=None)
+    health.add_argument("--max-age", type=float, default=600, help="âge maximum du heartbeat, en secondes")
+    health.set_defaults(func=cmd_health)
 
     for name in ("status", "paper-status"):
         status = sub.add_parser(name, help="Tableau de bord (journal SQLite)")
