@@ -205,12 +205,45 @@ def test_fees_are_converted_to_quote_currency() -> None:
     assert order["fee"] == pytest.approx(order["qty"] * 0.001 * order["price"])  # frais payés en BTC
 
 
-def test_reconcile_detects_manual_intervention() -> None:
-    ex = FakePrivateExchange(usdc=0.0, btc=0.5)
-    broker = _broker(ex)
-    broker.restore({"fees_paid": 0.0, "expected_units": 0.1})
+def test_bot_never_touches_holdings_it_did_not_buy() -> None:
+    """Compte testnet crédité de 1 BTC + 10 000 USDC : le bot ne gère que ses 100 USDC."""
+    ex = FakePrivateExchange(usdc=10_000.0, btc=1.0)
+    broker = _broker(ex, max_capital=100.0)
     broker.sync()
-    assert "≠ attendu" in broker.reconcile()
+    assert broker.units == 0 and broker.cash == 100.0
+    assert broker.weight(QUOTE.mid) == 0  # le BTC préexistant n'est pas « sa » position
+    res = broker.rebalance(NOW, QUOTE, 0.0, "signal")  # signal de vente : rien à vendre
+    assert ex.created == [] and res.done
+    broker.rebalance(NOW, QUOTE, 1.0, "signal")
+    bought = ex.created[0]["amount"]
+    assert bought * ex.created[0]["price"] <= 100.0
+    broker.rebalance(NOW, QUOTE, 0.0, "signal")
+    sold = ex.created[1]["amount"]
+    assert sold <= bought  # il revend au plus ce qu'il a acheté (moins les frais pris en BTC)
+    assert ex.balances["BTC"] == pytest.approx(1.0, abs=1e-6)  # le BTC d'origine est intact
+
+
+def test_bot_portfolio_is_clamped_to_real_balance() -> None:
+    ex = FakePrivateExchange(usdc=50.0, btc=0.0005)
+    broker = _broker(ex, max_capital=100.0)
+    broker.restore({"fees_paid": 0.0, "bot_units": 0.002, "bot_cash": 80.0})
+    broker.sync()
+    notes = broker.drain_notes()
+    assert len(notes) == 2 and "vente manuelle" in notes[0]
+    assert broker.units == 0.0005 and broker.cash == 50.0
+
+
+def test_bot_portfolio_survives_restart() -> None:
+    ex = FakePrivateExchange(usdc=10_000.0, btc=1.0)
+    broker = _broker(ex, max_capital=100.0)
+    broker.sync()
+    broker.rebalance(NOW, QUOTE, 1.0, "signal")
+    saved = broker.state()
+    again = _broker(ex, max_capital=100.0)
+    again.restore(saved)
+    again.sync()
+    assert again.units == pytest.approx(broker.units) and again.cash == pytest.approx(broker.cash)
+    assert again.drain_notes() == []
 
 
 # --- Trader + broker réel -----------------------------------------------------------------------

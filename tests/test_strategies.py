@@ -6,7 +6,7 @@ import pytest
 
 from bot.backtest.lookahead import find_lookahead
 from bot.backtest.validation import param_grid
-from bot.strategies import BollingerRsiReversion, DonchianBreakout, RandomStrategy, SmaCrossover
+from bot.strategies import Alternate, BollingerRsiReversion, DonchianBreakout, RandomStrategy, SmaCrossover
 from bot.strategies.indicators import bollinger, donchian, hold_between, rsi, sma
 from tests.helpers import make_ohlcv
 
@@ -128,6 +128,16 @@ def test_no_lookahead_for_every_grid_combination(cls) -> None:
 def test_positions_are_long_only_binary(cls) -> None:
     pos = cls().target_position(_random_walk())
     assert set(pos.unique()) <= {0.0, 1.0}
+
+
+def test_alternate_flips_by_timestamp_and_is_window_independent() -> None:
+    df = _random_walk(40)
+    pos = Alternate(period_bars=2).target_position(df)
+    assert pos.iloc[:8].tolist() == [0, 0, 1, 1, 0, 0, 1, 1]  # 2021-01-01 00:00 = début d'une période paire
+    # En temps réel la fenêtre glisse : la décision d'une bougie ne doit pas en dépendre.
+    shifted = Alternate(period_bars=2).target_position(df.iloc[5:])
+    pd.testing.assert_series_equal(shifted, pos.iloc[5:])
+    assert find_lookahead(Alternate(period_bars=3), df) == []
 
 
 def test_random_strategy_matches_requested_exposure() -> None:

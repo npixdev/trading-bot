@@ -297,14 +297,15 @@ def _connect(args: argparse.Namespace, live: bool):  # noqa: ANN202
         if live:
             raise SystemExit("REFUS : permissions de la clé non vérifiables sur cet exchange en mode réel.")
         print("  ⚠ Permissions non vérifiables : assure-toi que la clé n'a pas le droit de retrait.")
-    if not report.ip_restricted:
+    if report.ip_restricted is False:
         print("  ⚠ Clé non restreinte par IP (recommandé : restreindre à l'IP de la machine du bot).")
     ec = app.execution
     max_capital = args.max_capital or ec.max_capital
     broker = ExchangeBroker(exchange, symbol, max_capital, ec.max_slippage, order_timeout=ec.order_timeout)
     broker.sync()
-    print(f"  Soldes : {broker.units:.8f} {market['base']}, {broker.cash:,.2f} {market['quote']} disponibles ; "
-          f"capital géré plafonné à {max_capital:g}")
+    print(f"  Compte : {broker.account_units:.8f} {market['base']}, {broker.account_cash:,.2f} {market['quote']} disponibles")
+    print(f"  Un bot neuf gérerait : {broker.cash:,.2f} {market['quote']} (plafond {max_capital:g}) ; "
+          "un bot existant reprend son propre portefeuille depuis son journal, le reste du compte n'est jamais touché")
     print(f"  Minimums du marché : {market['limits']['amount']['min']} {market['base']}, "
           f"montant {market['limits']['cost']['min']} {market['quote']}")
     try:
@@ -319,8 +320,24 @@ def _connect(args: argparse.Namespace, live: bool):  # noqa: ANN202
     return app, exchange_name, symbol, report, broker, max_capital
 
 
+def _explain_ccxt_error(exc: ccxt.BaseError) -> str:
+    hints = {
+        ccxt.AuthenticationError: "clé ou secret refusés : vérifie .env (clés testnet ≠ clés réelles, pas d'espace en trop)",
+        ccxt.PermissionDenied: "permission refusée : droits de la clé ou restriction IP",
+        ccxt.InvalidNonce: "horloge du PC décalée : synchronise l'heure de Windows (Paramètres → Heure → Synchroniser)",
+        ccxt.NetworkError: "exchange injoignable : connexion Internet ou maintenance",
+    }
+    for cls, hint in hints.items():
+        if isinstance(exc, cls):
+            return f"{type(exc).__name__} — {hint}\n  Détail : {str(exc)[:300]}"
+    return f"{type(exc).__name__} : {str(exc)[:300]}"
+
+
 def cmd_check_keys(args: argparse.Namespace) -> None:
-    _connect(args, live=args.live)
+    try:
+        _connect(args, live=args.live)
+    except ccxt.BaseError as exc:
+        raise SystemExit(f"Échec de la vérification : {_explain_ccxt_error(exc)}") from None
     print("\nVérifications terminées. Aucun ordre n'a été envoyé.")
 
 

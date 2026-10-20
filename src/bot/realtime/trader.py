@@ -122,6 +122,7 @@ class Trader:
         candles = self.feed.closed_candles(self.warmup_bars)
         quote = self.feed.quote()
         self.broker.sync()
+        self._log_broker_notes(now)
         if candles.empty:
             return
         if not self._reconciled:
@@ -137,15 +138,16 @@ class Trader:
         self._check_stop(now, quote)
         self._flush()
 
+    def _log_broker_notes(self, now: pd.Timestamp) -> None:
+        """Écarts entre le portefeuille du bot et les soldes réels, constatés par le broker."""
+        for note in getattr(self.broker, "drain_notes", list)():
+            self.store.log_event(now, "reconcile", note)
+            log.warning("Réconciliation : %s", note)
+
     def _reconcile(self, now: pd.Timestamp, quote: Quote) -> None:
         """Au démarrage : l'exchange fait foi. Aligne la position connue sur le solde réel."""
         self._reconciled = True
-        reconcile = getattr(self.broker, "reconcile", None)
-        message = reconcile() if reconcile else None
         actual = self.broker.weight(quote.mid)
-        if message:
-            self.store.log_event(now, "reconcile", message)
-            log.warning("Réconciliation : %s", message)
         if self.current_weight > 0 and actual == 0:
             self.current_weight = 0.0
             if self.risk is not None:
@@ -226,6 +228,7 @@ class Trader:
 
     def _execute(self, now: pd.Timestamp, quote: Quote, target: float, reason: str) -> ExecutionResult:
         result = self.broker.rebalance(now, quote, target, reason)
+        self._log_broker_notes(now)
         for order in result.orders:
             self.store.log_order(order, quote.bid, quote.ask, reason)
             log.info("Ordre %s %.8f à %.2f (frais %.4f) — %s", order["side"], order["qty"], order["price"], order["fee"], reason)

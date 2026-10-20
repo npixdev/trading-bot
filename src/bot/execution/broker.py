@@ -99,8 +99,12 @@ FINAL_STATUSES = ("closed", "canceled", "expired", "rejected")
 class ExchangeBroker:
     """Ordres réels via ccxt : limit IOC à prix plafonné, sur le marché spot (sans marge).
 
-    Le solde de l'exchange fait foi : il est relu avant et après chaque ordre.
-    Le bot considère tout le BTC et l'USDC du compte comme les siens → utiliser un sous-compte dédié.
+    Avec `max_capital` (cas normal), le bot tient **son propre portefeuille** à l'intérieur du compte :
+    il démarre avec `max_capital` en devise de cotation et 0 crypto, ne vend jamais plus que ce qu'il a
+    lui-même acheté, et ignore tout ce que le compte détient par ailleurs.
+    Sans `max_capital` (None), il gère le compte entier (réservé à un sous-compte dédié).
+    Le solde de l'exchange fait foi : il est relu avant et après chaque ordre, et le portefeuille du bot
+    est ramené au solde réel s'il le dépasse (vente manuelle, frais non comptés…).
     """
 
     def __init__(
@@ -118,36 +122,85 @@ class ExchangeBroker:
         self.base, self.quote_ccy = self.market["base"], self.market["quote"]
         self.max_capital, self.max_slippage = max_capital, max_slippage
         self.fee_buffer, self.order_timeout, self.sleep = fee_buffer, order_timeout, sleep
-        self.units, self.cash, self.fees_paid = 0.0, 0.0, 0.0
-        self.expected_units: float | None = None
+        self.account_units, self.account_cash, self.fees_paid = 0.0, 0.0, 0.0
+        self.bot_units, self.bot_cash = 0.0, None  # bot_cash initialisé au premier sync
+        self.notes: list[str] = []  # écarts constatés avec les soldes réels, à journaliser
         self._ids = count()
+
+    @property
+    def manages_whole_account(self) -> bool:
+        return self.max_capital is None
+
+    @property
+    def units(self) -> float:
+        return self.account_units if self.manages_whole_account else self.bot_units
+
+    @property
+    def cash(self) -> float:
+        return self.account_cash if self.manages_whole_account else (self.bot_cash or 0.0)
 
     # --- Soldes ------------------------------------------------------------------------------
 
+    def resync_clock(self) -> None:
+        """Remesure l'écart d'horloge PC ↔ serveur (l'horloge d'un PC dérive de quelques ms par heure)."""
+        load = getattr(self.exchange, "load_time_difference", None)
+        if load is not None:
+            offset = load()
+            log.warning("Horloge resynchronisée avec %s (écart %s ms)", self.exchange.id, offset)
+
     def sync(self) -> None:
-        balance = call_with_retry(self.exchange.fetch_balance, 3, self.sleep)
-        self.units = float((balance.get(self.base) or {}).get("total") or 0.0)
-        self.cash = float((balance.get(self.quote_ccy) or {}).get("free") or 0.0)
+        try:
+            balance = self.exchange.fetch_balance()
+        except ccxt.InvalidNonce:
+            self.resync_clock()
+            balance = call_with_retry(self.exchange.fetch_balance, 3, self.sleep)
+        except ccxt.NetworkError:
+            balance = call_with_retry(self.exchange.fetch_balance, 3, self.sleep)
+        self.account_units = float((balance.get(self.base) or {}).get("total") or 0.0)
+        self.account_cash = float((balance.get(self.quote_ccy) or {}).get("free") or 0.0)
+        if self.manages_whole_account:
+            return
+        if self.bot_cash is None:
+            self.bot_cash = min(self.max_capital, self.account_cash)  # type: ignore[type-var]
+        dust = self.market["limits"]["amount"]["min"] or 0.0
+        if self.bot_units > self.account_units:
+            if self.bot_units - self.account_units > dust:
+                self.notes.append(
+                    f"le bot croyait détenir {self.bot_units:.8f} {self.base}, le compte n'en a que "
+                    f"{self.account_units:.8f} (vente manuelle ?) : ramené au solde réel"
+                )
+            self.bot_units = self.account_units
+        if self.bot_cash > self.account_cash + 0.01:
+            self.notes.append(
+                f"cash du bot {self.bot_cash:,.2f} > disponible {self.account_cash:,.2f} {self.quote_ccy} : ramené au solde réel"
+            )
+            self.bot_cash = self.account_cash
+
+    def drain_notes(self) -> list[str]:
+        notes, self.notes = self.notes, []
+        return notes
 
     def account_value(self, price: float) -> float:
-        return self.cash + self.units * price
+        return self.account_cash + self.account_units * price
 
     def equity(self, price: float) -> float:
-        value = self.account_value(price)
-        return value if self.max_capital is None else min(value, self.max_capital)
+        return self.cash + self.units * price
 
     def weight(self, price: float) -> float:
         eq = self.equity(price)
         return min(self.units * price / eq, 1.0) if eq > 0 else 0.0
 
-    def reconcile(self) -> str | None:
-        """Compare le BTC attendu (état sauvegardé) au solde réel. Renvoie un message si écart."""
-        if self.expected_units is None:
-            return None
-        min_amount = self.market["limits"]["amount"]["min"] or 0.0
-        if abs(self.units - self.expected_units) > max(min_amount, 1e-12):
-            return f"solde {self.base} réel {self.units:.8f} ≠ attendu {self.expected_units:.8f} (intervention manuelle ?)"
-        return None
+    def _apply_fill(self, side: str, filled: float, avg: float, fee_base: float, fee_quote: float) -> None:
+        """Tient à jour le portefeuille propre du bot (inutile en mode « compte entier »)."""
+        if self.manages_whole_account:
+            return
+        assert self.bot_cash is not None
+        if side == "buy":
+            self.bot_units += filled - fee_base
+            self.bot_cash -= filled * avg + fee_quote
+        else:
+            self.bot_units -= filled + fee_base
+            self.bot_cash += filled * avg - fee_quote
 
     # --- Ordres ------------------------------------------------------------------------------
 
@@ -158,12 +211,14 @@ class ExchangeBroker:
         if delta > 0:
             side = "buy"
             limit_price = quote.ask * (1 + self.max_slippage)
-            notional = min(delta, self.cash * (1 - self.fee_buffer))
+            available = min(self.cash, self.account_cash)
+            notional = min(delta, available * (1 - self.fee_buffer))
             amount = self._floor_amount(notional / limit_price)
         elif delta < 0:
             side = "sell"
             limit_price = quote.bid * (1 - self.max_slippage)
-            amount = self._floor_amount(self.units if weight == 0 else min(-delta / mid, self.units))
+            mine = min(self.units, self.account_units)  # jamais plus que ce que le bot a acheté lui-même
+            amount = self._floor_amount(mine if weight == 0 else min(-delta / mid, mine))
         else:
             return ExecutionResult()
 
@@ -174,7 +229,6 @@ class ExchangeBroker:
 
         result = self._place(now, side, amount, limit_price)
         self.sync()
-        self.expected_units = self.units
         return result
 
     def _floor_amount(self, amount: float) -> float:
@@ -207,6 +261,10 @@ class ExchangeBroker:
             order = self.exchange.create_order(self.symbol, "limit", side, amount, price, params)
         except (ccxt.InsufficientFunds, ccxt.InvalidOrder) as exc:
             return ExecutionResult(done=False, events=[("order_rejected", f"{side} {amount:.8f} @ {price} : {exc}"[:500])])
+        except ccxt.InvalidNonce:
+            # Horodatage refusé : l'exchange n'a PAS traité l'ordre. On resynchronise ; nouvel essai au prochain poll.
+            self.resync_clock()
+            return ExecutionResult(done=False, events=[("clock_resync", f"{side} refusé (horloge), resynchronisée")])
         except ccxt.NetworkError as exc:
             # L'ordre est peut-être parti ! On demande à l'exchange plutôt que de le renvoyer.
             order = self._find_by_client_id(cid)
@@ -222,8 +280,10 @@ class ExchangeBroker:
             events.append(("order_unfilled", f"{side} {amount:.8f} @ {price} : rien d'exécuté (statut {order.get('status')})"))
             return ExecutionResult(done=False, events=events)
         avg = float(order.get("average") or order.get("price") or price)
-        fee = self._fee_in_quote(order, avg)
+        fee_base, fee_quote = self._fees(order)
+        fee = fee_base * avg + fee_quote
         self.fees_paid += fee
+        self._apply_fill(side, filled, avg, fee_base, fee_quote)
         done = filled >= amount * (1 - 1e-9)
         if not done:
             events.append(("partial_fill", f"{side} {filled:.8f}/{amount:.8f} {self.base} exécutés à {avg:.2f}"))
@@ -246,19 +306,31 @@ class ExchangeBroker:
             order = call_with_retry(lambda: self.exchange.fetch_order(order["id"], self.symbol), 3, self.sleep)
         return order
 
-    def _fee_in_quote(self, order: dict, avg_price: float) -> float:
+    def _fees(self, order: dict) -> tuple[float, float]:
+        """(frais payés en crypto, frais payés en devise de cotation). Binance/OKX prennent les frais
+        d'un achat en crypto ; d'autres devises (ex. BNB) sont ignorées et rattrapées au sync."""
         fees = order.get("fees") or ([order["fee"]] if order.get("fee") else [])
-        total = 0.0
+        in_base = in_quote = 0.0
         for f in fees:
             cost = abs(float(f.get("cost") or 0.0))
-            total += cost * avg_price if f.get("currency") == self.base else cost
-        return total
+            if f.get("currency") == self.base:
+                in_base += cost
+            elif f.get("currency") == self.quote_ccy:
+                in_quote += cost
+        return in_base, in_quote
 
     # --- Persistance -------------------------------------------------------------------------
 
     def state(self) -> dict[str, Any]:
-        return {"units": self.units, "cash": self.cash, "fees_paid": self.fees_paid, "expected_units": self.expected_units}
+        return {
+            "units": self.units,
+            "cash": self.cash,
+            "fees_paid": self.fees_paid,
+            "bot_units": self.bot_units,
+            "bot_cash": self.bot_cash,
+        }
 
     def restore(self, s: dict[str, Any]) -> None:
         self.fees_paid = s.get("fees_paid", 0.0)
-        self.expected_units = s.get("expected_units", s.get("units"))
+        self.bot_units = s.get("bot_units", 0.0)
+        self.bot_cash = s.get("bot_cash")

@@ -102,6 +102,10 @@ Bougies absentes de l'historique, en général pendant une maintenance de l'exch
 **Futures / perpétuels** [0]
 Contrats qui suivent le prix d'une crypto sans la posséder, généralement avec levier. **Interdits dans ce projet** jusqu'à nouvel ordre.
 
+**Horodatage / nonce** [6]
+Chaque requête signée envoyée à l'exchange porte l'heure de ton ordinateur. Si l'horloge du PC dérive trop, l'exchange refuse la requête, pour empêcher qu'on rejoue une ancienne requête interceptée.
+*Ex. : ton PC avait 3,4 s d'avance sur Binance → « Timestamp … ahead of the server's time ». Le bot mesure maintenant l'écart et le compense.*
+
 **Identifiant client d'ordre (*client order id*)** [6]
 Identifiant unique choisi par le bot et joint à chaque ordre. Si la connexion coupe pendant l'envoi, le bot demande à l'exchange « as-tu reçu l'ordre X ? » au lieu de le renvoyer.
 *Ex. : sans lui, une coupure au mauvais moment → le bot renvoie l'achat → il achète deux fois 100 USDC de BTC au lieu d'une.*

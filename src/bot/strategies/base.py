@@ -44,6 +44,27 @@ class BuyAndHold(Strategy):
 
 
 @dataclass(frozen=True)
+class Alternate(Strategy):
+    """POUR TESTER L'EXÉCUTION UNIQUEMENT : investi une période sur deux, selon l'heure de la bougie.
+
+    Ne dépend que de l'horodatage (jamais du prix) : force des achats et des ventes réguliers pour
+    vérifier la chaîne d'ordres sur un testnet. Aucune valeur comme stratégie de trading.
+    """
+
+    name: ClassVar[str] = "alternate"
+    period_bars: int = 1
+
+    def target_position(self, df: pd.DataFrame) -> pd.Series:
+        if len(df) < 2:
+            return pd.Series(0.0, index=df.index)
+        step_ns = pd.Timedelta(df.index.to_series().diff().median()).as_unit("ns").value
+        # L'index peut être en µs (pandas 3) : tout ramener en nanosecondes avant de diviser.
+        stamps_ns = df.index.as_unit("ns").asi8
+        slot = (stamps_ns // (step_ns * self.period_bars)) % 2
+        return pd.Series(slot.astype(float), index=df.index)
+
+
+@dataclass(frozen=True)
 class RandomStrategy(Strategy):
     """Entre et sort au hasard : positions de `avg_hold_bars` bougies en moyenne, investi
     une fraction `exposure` du temps.

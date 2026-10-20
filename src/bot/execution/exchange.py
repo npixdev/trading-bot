@@ -38,7 +38,14 @@ def load_api_keys(exchange: str, sandbox: bool, env_file: Path = Path(".env")) -
 def create_private_exchange(name: str, keys: ApiKeys, sandbox: bool) -> ccxt.Exchange:
     if name not in ccxt.exchanges:
         raise ValueError(f"Exchange inconnu de ccxt : {name!r}")
-    options = {"enableRateLimit": True, "apiKey": keys.api_key, "secret": keys.secret}
+    options: dict[str, object] = {
+        "enableRateLimit": True,
+        "apiKey": keys.api_key,
+        "secret": keys.secret,
+        # Requêtes signées horodatées : si l'horloge du PC dérive, l'exchange les rejette (InvalidNonce).
+        # ccxt mesure l'écart avec le serveur au chargement des marchés et le compense.
+        "options": {"adjustForTimeDifference": True, "recvWindow": 10_000},
+    }
     if keys.password:
         options["password"] = keys.password
     exchange: ccxt.Exchange = getattr(ccxt, name)(options)
