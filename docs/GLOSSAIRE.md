@@ -102,6 +102,10 @@ Bougies absentes de l'historique, en général pendant une maintenance de l'exch
 **Futures / perpétuels** [0]
 Contrats qui suivent le prix d'une crypto sans la posséder, généralement avec levier. **Interdits dans ce projet** jusqu'à nouvel ordre.
 
+**Identifiant client d'ordre (*client order id*)** [6]
+Identifiant unique choisi par le bot et joint à chaque ordre. Si la connexion coupe pendant l'envoi, le bot demande à l'exchange « as-tu reçu l'ordre X ? » au lieu de le renvoyer.
+*Ex. : sans lui, une coupure au mauvais moment → le bot renvoie l'achat → il achète deux fois 100 USDC de BTC au lieu d'une.*
+
 **Kill switch (coupe-circuit)** [4]
 Arrêt définitif du bot quand sa perte depuis son plus haut dépasse un seuil. Protège contre un bug ou une stratégie cassée ; ne se réarme qu'à la main, après analyse.
 *Ex. : seuil −30 %, capital passé de 10 000 à 6 900 → tout est vendu, plus aucun ordre.*
@@ -155,6 +159,10 @@ Le programme de l'exchange qui fait se rencontrer les ordres d'achat et de vente
 Ordre à un prix maximum (achat) ou minimum (vente). Prix garanti, exécution non garantie.
 *Ex. : BTC à 60 000 €, tu places un achat limit à 59 500 €. Si le prix ne descend jamais à 59 500 €, rien ne se passe.*
 
+**Ordre limit IOC (*Immediate Or Cancel*)** [6]
+Ordre limit exécuté immédiatement dans la limite de son prix ; la partie non exécutable est annulée aussitôt. Sert d'« ordre au marché avec plafond » : le slippage est borné.
+*Ex. : ask à 80 010, plafond à 80 010 × 1,002 = 80 170. Si un krach fait monter les vendeurs au-delà, on n'achète que ce qui est disponible sous 80 170, le reste est annulé.*
+
 **Ordre market** [0]
 Ordre exécuté immédiatement au meilleur prix disponible. Exécution garantie, prix non garanti.
 *Ex. : tu achètes 0,01 BTC au marché, le meilleur ask est 60 010 € → tu paies ~600,10 € + frais taker.*
@@ -173,6 +181,10 @@ Ordre dormant qui se déclenche quand le prix atteint un seuil, pour couper une 
 **Ordre stop-limit** [0]
 Stop qui, une fois déclenché, place un ordre limit au lieu d'un market. Risque : ne pas être exécuté si le prix chute trop vite.
 *Ex. : stop 57 000 €, limit 56 900 €. Le BTC passe de 57 100 € à 55 000 € en une minute → ton ordre à 56 900 € n'est jamais rempli, tu es toujours en position et ta perte continue.*
+
+**Permissions d'une clé API / droit de retrait** [6]
+Ce qu'une clé autorise : lire (soldes, ordres), trader, retirer des fonds vers une adresse externe. Le bot n'a besoin que de lire + trader ; le droit de retrait est la porte d'entrée des vols.
+*Ex. : clé « read + trade » volée → le voleur peut faire de mauvais trades, mais l'argent reste sur ton compte. Clé « withdraw » volée → compte vidé en quelques secondes.*
 
 **Paper trading** [5]
 Faire tourner le bot en temps réel sur les vrais prix, avec un portefeuille fictif : aucun ordre n'est envoyé. Teste la mécanique (données, signaux, garde-fous, pannes) sans risquer d'argent.
@@ -196,6 +208,10 @@ Quantité disponible dans le carnet à chaque niveau de prix.
 **Rate limit (limite de débit)** [1]
 Nombre maximum de requêtes autorisées par l'exchange sur une période. Au-delà : erreur, puis bannissement temporaire de ton IP ou de ta clé. ccxt espace automatiquement les requêtes (`enableRateLimit`).
 *Ex. : si l'exchange autorise ~20 requêtes/s et que ton bot en envoie 100 d'un coup, il peut être bloqué plusieurs minutes, au pire moment (pendant un krach).*
+
+**Réconciliation** [6]
+Comparer ce que le bot croit détenir à ce que l'exchange dit réellement, et donner raison à l'exchange.
+*Ex. : le bot pense détenir 0,01 BTC, mais tu as vendu à la main depuis l'appli → au redémarrage il lit 0 BTC, le note dans le journal et repart de là.*
 
 **Reprise d'état** [5]
 Après un arrêt (crash, redémarrage), le bot recharge exactement son état : cash, BTC détenu, stop en cours, kill switch, dernière bougie traitée. Il ne rejoue pas les décisions manquées : on ne peut pas trader dans le passé.
@@ -244,6 +260,10 @@ Ajuster une stratégie si précisément au passé qu'elle capture du bruit (du h
 **Train / test** [2]
 Découpage chronologique de l'historique : on choisit les paramètres sur la partie *train* (entraînement), on juge sur la partie *test* jamais vue. Jamais de mélange aléatoire : le futur ne doit pas servir à prédire le passé.
 *Ex. : 70/30 sur 2021-2026 → train 2021-01 à 2025-01, test 2025-01 à 2026-10.*
+
+**Sous-compte** [6]
+Compte secondaire rattaché à ton compte principal, avec ses propres soldes et clés API. Isole l'argent du bot : un bug ou une clé volée ne touche que le sous-compte.
+*Ex. : 2 000 € sur le compte principal, 100 USDC transférés sur le sous-compte « bot » → le pire cas est limité à 100 USDC.*
 
 **Stop-loss dans le bot** [4]
 Prix de sortie fixé à l'entrée (ici en multiple d'ATR ou en %), vérifié pendant chaque bougie. Après un stop, le bot ne rachète pas tant que la stratégie n'est pas d'abord repassée à 0.

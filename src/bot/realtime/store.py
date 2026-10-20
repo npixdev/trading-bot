@@ -38,7 +38,15 @@ class Store:
         self.path = path
         self.conn = sqlite3.connect(path)
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Ajoute les colonnes apparues après la création d'un journal existant."""
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(orders)")}
+        for name in ("exchange_id", "client_id"):
+            if name not in columns:
+                self.conn.execute(f"ALTER TABLE orders ADD COLUMN {name} TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -72,8 +80,12 @@ class Store:
 
     def log_order(self, order: dict[str, object], bid: float, ask: float, reason: str) -> None:
         self.conn.execute(
-            "INSERT INTO orders (time, side, qty, price, fee, bid, ask, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (_iso(order["time"]), order["side"], order["qty"], order["price"], order["fee"], bid, ask, reason),  # type: ignore[arg-type]
+            "INSERT INTO orders (time, side, qty, price, fee, bid, ask, reason, exchange_id, client_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _iso(order["time"]), order["side"], order["qty"], order["price"], order["fee"],  # type: ignore[arg-type]
+                bid, ask, reason, order.get("id"), order.get("client_id"),
+            ),
         )
 
     def log_equity(self, time: pd.Timestamp, equity: float, cash: float, units: float, price: float) -> None:

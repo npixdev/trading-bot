@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,9 +10,10 @@ import pandas as pd
 import pytest
 
 from bot.config import BacktestConfig, RiskConfig
-from bot.paper import MarketFeed, PaperTrader, Quote, Store, run_loop
-from bot.paper.status import render, summarize
-from bot.paper.trader import ConfigMismatch, make_identity
+from bot.execution import PaperBroker
+from bot.realtime import MarketFeed, Quote, Store, Trader, run_loop
+from bot.realtime.status import render, summarize
+from bot.realtime.trader import ConfigMismatch, make_identity
 from bot.strategies import Strategy
 from tests.conftest import HOUR_MS, FakeExchange
 from tests.helpers import make_ohlcv
@@ -61,10 +62,10 @@ class FakeFeed:
         self.reconnects += 1
 
 
-def _trader(feed: FakeFeed, db: Path, risk: RiskConfig | None = None, strategy: Strategy | None = None) -> PaperTrader:
+def _trader(feed: FakeFeed, db: Path, risk: RiskConfig | None = None, strategy: Strategy | None = None) -> Trader:
     strategy = strategy or Above(100.0)
-    identity = make_identity("fake", "BTC/USDC", feed.timeframe, strategy, risk)
-    return PaperTrader(feed, Store(db), strategy, COSTS, risk, identity, warmup_bars=50)
+    identity = make_identity("paper", "fake", "BTC/USDC", feed.timeframe, strategy, risk)
+    return Trader(feed, Store(db), strategy, PaperBroker(COSTS), risk, identity, warmup_bars=50)
 
 
 def _closes() -> list[float]:
@@ -76,7 +77,7 @@ def test_each_bar_is_processed_once_and_buys_at_ask(tmp_path: Path) -> None:
     trader = _trader(feed, tmp_path / "p.sqlite")
     feed.advance(4)
     trader.step()
-    assert trader.book.units == 0  # 99 < 100 : pas d'achat
+    assert trader.broker.units == 0  # 99 < 100 : pas d'achat
     feed.advance(5)  # clôture à 101 → signal 1 → achat immédiat (= ouverture de la bougie 6)
     trader.step()
     trader.step()  # même bougie : rien de nouveau
@@ -98,7 +99,7 @@ def test_sells_at_bid_when_signal_drops(tmp_path: Path) -> None:
     orders = trader.store.table("orders")
     assert orders["side"].tolist() == ["buy", "sell"]
     assert orders.iloc[1]["price"] == pytest.approx(94.9 * (1 - COSTS.slippage))  # bid − slippage
-    assert trader.book.units == 0
+    assert trader.broker.units == 0
 
 
 def test_feed_excludes_unclosed_candle() -> None:
@@ -117,12 +118,12 @@ def test_stop_triggers_between_bars_at_bid(tmp_path: Path) -> None:
     feed.advance(5)
     trader.step()
     stop = trader.risk.stop
-    assert stop == pytest.approx(trader.book.fills[-1]["price"] * 0.95)
+    assert stop == pytest.approx(trader.broker.book.fills[-1]["price"] * 0.95)
     feed.advance(5, price=stop - 1)  # le prix plonge pendant la bougie, avant sa clôture
     trader.step()
     orders = trader.store.table("orders")
     assert orders["reason"].tolist() == ["signal", "stop"]
-    assert trader.book.units == 0
+    assert trader.broker.units == 0
     assert "stop" in trader.store.table("events")["kind"].tolist()
 
 
@@ -133,11 +134,11 @@ def test_restart_restores_full_state(tmp_path: Path) -> None:
     first = _trader(feed, db, risk=risk)
     feed.advance(5)
     first.step()
-    cash, units, stop = first.book.cash, first.book.units, first.risk.stop
+    cash, units, stop = first.broker.cash, first.broker.units, first.risk.stop
     first.store.close()  # « crash » : le processus disparaît
 
     second = _trader(feed, db, risk=risk)
-    assert (second.book.cash, second.book.units, second.risk.stop) == (cash, units, stop)
+    assert (second.broker.cash, second.broker.units, second.risk.stop) == (cash, units, stop)
     assert second.last_bar == feed.candles.index[5]
     second.step()  # même bougie : ne doit pas être retraitée
     assert len(second.store.table("decisions")) == 1
@@ -177,7 +178,7 @@ def test_kill_switch_survives_restart(tmp_path: Path) -> None:
     assert t2.risk.killed
     feed.advance(9)
     t2.step()
-    assert t2.book.units == 0  # signal à 1 mais kill switch actif : aucun rachat
+    assert t2.broker.units == 0  # signal à 1 mais kill switch actif : aucun rachat
     assert t2.store.table("decisions")["note"].iloc[-1] == "kill switch actif"
 
 
@@ -261,11 +262,30 @@ def test_status_summary(tmp_path: Path) -> None:
 
 
 def test_paper_module_cannot_send_orders() -> None:
-    """Garde-fou de conception : aucun appel d'ordre ni de clé API dans le module paper."""
-    sources = "".join(p.read_text(encoding="utf-8") for p in Path("src/bot/paper").glob("*.py"))
+    """Garde-fou de conception : aucun appel d'ordre ni de clé API dans la boucle temps réel."""
+    sources = "".join(p.read_text(encoding="utf-8") for p in Path("src/bot/realtime").glob("*.py"))
     for forbidden in ("create_order", "createOrder", "apiKey", "secret", "cancel_order"):
         assert forbidden not in sources
     assert MarketFeed("okx", "BTC/USDC", "1h").exchange.apiKey in (None, "")
+
+
+def test_step5_journal_is_migrated(tmp_path: Path) -> None:
+    """Un journal créé avant l'étape 6 (format plat, sans « mode ») est repris sans perte."""
+    db = tmp_path / "old.sqlite"
+    feed = FakeFeed(_closes())
+    strategy = Above(100.0)
+    new_identity = make_identity("paper", "fake", "BTC/USDC", feed.timeframe, strategy, None)
+    old_identity = {k: v for k, v in new_identity.items() if k != "mode"}
+    store = Store(db)
+    store.save_state({
+        "identity": old_identity, "cash": 1234.5, "units": 0.5, "fees_paid": 7.0, "entry": None,
+        "current_weight": 1.0, "last_bar": feed.candles.index[3].isoformat(), "risk": None, "started": None,
+    })
+    store.commit()
+    store.close()
+    t = _trader(feed, db, strategy=strategy)
+    assert (t.broker.cash, t.broker.units, t.broker.fees_paid) == (1234.5, 0.5, 7.0)
+    assert t.current_weight == 1.0 and t.last_bar == feed.candles.index[3]
 
 
 def test_risk_state_roundtrip() -> None:

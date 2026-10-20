@@ -89,12 +89,30 @@ class PaperConfig:
 
 
 @dataclass(frozen=True)
+class ExecutionConfig:
+    """Ordres réels (testnet puis live). Même stratégie/garde-fous que la section paper."""
+
+    max_capital: float = 100.0  # capital maximum géré par le bot, en devise de cotation (USDC)
+    max_slippage: float = 0.002  # prix plafond des ordres IOC : ask + 0,2 % / bid − 0,2 %
+    order_timeout: float = 15.0
+    testnet_db: Path = Path("data/testnet.sqlite")
+    live_db: Path = Path("data/live.sqlite")
+
+    def __post_init__(self) -> None:
+        if self.max_capital <= 0:
+            raise ValueError("max_capital doit être > 0")
+        if not 0 < self.max_slippage < 0.05:
+            raise ValueError("max_slippage doit être dans ]0, 5 %[")
+
+
+@dataclass(frozen=True)
 class AppConfig:
     data: DataConfig = field(default_factory=DataConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     paper: PaperConfig = field(default_factory=PaperConfig)
+    execution: ExecutionConfig = field(default_factory=ExecutionConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
@@ -113,7 +131,16 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         backtest=BacktestConfig(**(raw.get("backtest") or {})),
         risk=RiskConfig(**(raw.get("risk") or {})),
         paper=_paper(raw.get("paper") or {}),
+        execution=_execution(raw.get("execution") or {}),
     )
+
+
+def _execution(raw: dict[str, Any]) -> ExecutionConfig:
+    raw = dict(raw)
+    for key in ("testnet_db", "live_db"):
+        if key in raw:
+            raw[key] = Path(raw[key])
+    return ExecutionConfig(**raw)
 
 
 def _paper(raw: dict[str, Any]) -> PaperConfig:

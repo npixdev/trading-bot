@@ -27,7 +27,10 @@ class Quote:
 
 
 class MarketFeed:
-    """Bougies clôturées et meilleur bid/ask. Instancie ccxt **sans clés** : lecture seule."""
+    """Bougies clôturées et meilleur bid/ask. Instancie ccxt **sans clés** : lecture seule.
+
+    `sandbox=True` lit les prix de l'environnement démo (testnet), qui a son propre carnet d'ordres.
+    """
 
     def __init__(
         self,
@@ -36,14 +39,15 @@ class MarketFeed:
         timeframe: str,
         max_retries: int = 3,
         sleep: Callable[[float], None] = time.sleep,
+        sandbox: bool = False,
     ) -> None:
         self.exchange_name, self.symbol, self.timeframe = exchange_name, symbol, timeframe
-        self.max_retries, self.sleep = max_retries, sleep
-        self.exchange = create_exchange(exchange_name)
+        self.max_retries, self.sleep, self.sandbox = max_retries, sleep, sandbox
+        self.exchange = create_exchange(exchange_name, sandbox=sandbox)
 
     def reconnect(self) -> None:
         log.warning("Reconnexion à %s", self.exchange_name)
-        self.exchange = create_exchange(self.exchange_name)
+        self.exchange = create_exchange(self.exchange_name, sandbox=self.sandbox)
 
     def now(self) -> pd.Timestamp:
         return pd.Timestamp.now(tz="UTC")

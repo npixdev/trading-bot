@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import ccxt
 import pandas as pd
 
 from bot.backtest import run_backtest, train_test_split, walk_forward
@@ -18,9 +19,18 @@ from bot.config import DEFAULT_CONFIG_PATH, BacktestConfig, RiskConfig, load_con
 from bot.data import cache_path, create_exchange, find_gaps, load_cache, update_ohlcv
 from bot.data.quality import find_invalid_rows
 from bot.data.resample import resample_ohlcv
-from bot.paper import MarketFeed, PaperTrader, Store, run_loop
-from bot.paper.status import render, summarize
-from bot.paper.trader import ConfigMismatch, make_identity
+from bot.execution import (
+    ExchangeBroker,
+    PaperBroker,
+    check_api_permissions,
+    create_private_exchange,
+    ensure_spot_market,
+    load_api_keys,
+)
+from bot.execution.live_guard import confirm_live
+from bot.realtime import MarketFeed, Store, Trader, run_loop
+from bot.realtime.status import render, summarize
+from bot.realtime.trader import ConfigMismatch, make_identity
 from bot.report import run_comparison, verdict, write_report
 from bot.strategies import STRATEGIES, BuyAndHold
 
@@ -230,36 +240,111 @@ def _paper_setup(args: argparse.Namespace):  # noqa: ANN202
     return app, pc, timeframe, strategy, risk, costs, db
 
 
-def cmd_paper(args: argparse.Namespace) -> None:
-    app, pc, timeframe, strategy, risk, costs, db = _paper_setup(args)
-    exchange, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
-    if args.reset and db.exists():
-        answer = input(f"Supprimer le journal de paper trading {db} ? Tape 'oui' pour confirmer : ")
+def _maybe_reset(db: Path, reset: bool) -> None:
+    if reset and db.exists():
+        answer = input(f"Supprimer le journal {db} ? Tape 'oui' pour confirmer : ")
         if answer.strip().lower() != "oui":
             raise SystemExit("Annulé.")
         db.unlink()
-    print(f"PAPER TRADING (aucun ordre réel) — {exchange} {symbol} {timeframe}, {strategy}")
-    print(f"Garde-fous : {'désactivés' if risk is None else risk}")
-    print(f"Journal : {db.resolve()}  |  Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
 
-    feed = MarketFeed(exchange, symbol, timeframe)
+
+def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, db: Path, exchange: str,  # noqa: ANN001
+                symbol: str, timeframe: str) -> None:
     store = Store(db)
     try:
-        identity = make_identity(exchange, symbol, timeframe, strategy, risk)
-        trader = PaperTrader(feed, store, strategy, costs, risk, identity, warmup_bars=pc.warmup_bars)
+        identity = make_identity(mode, exchange, symbol, timeframe, strategy, risk)
+        trader = Trader(feed, store, strategy, broker, risk, identity, warmup_bars=pc.warmup_bars)
     except ConfigMismatch as exc:
         store.close()
         raise SystemExit(str(exc)) from None
+    print(f"Journal : {db.resolve()}  |  Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
     try:
         run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration)
     finally:
         store.close()
 
 
-def cmd_paper_status(args: argparse.Namespace) -> None:
-    db =args.db or load_config(DEFAULT_CONFIG_PATH).paper.db
+def cmd_paper(args: argparse.Namespace) -> None:
+    app, pc, timeframe, strategy, risk, costs, db = _paper_setup(args)
+    exchange, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
+    _maybe_reset(db, args.reset)
+    print(f"PAPER TRADING (aucun ordre réel) — {exchange} {symbol} {timeframe}, {strategy}")
+    print(f"Garde-fous : {'désactivés' if risk is None else risk}")
+    feed = MarketFeed(exchange, symbol, timeframe)
+    _run_trader("paper", feed, PaperBroker(costs), args, pc, strategy, risk, db, exchange, symbol, timeframe)
+
+
+def _connect(args: argparse.Namespace, live: bool):  # noqa: ANN202
+    """Connexion authentifiée + contrôles de sécurité. Ne passe aucun ordre."""
+    app = load_config(DEFAULT_CONFIG_PATH)
+    exchange_name, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
+    sandbox = not live
+    try:
+        keys = load_api_keys(exchange_name, sandbox=sandbox)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from None
+    exchange = create_private_exchange(exchange_name, keys, sandbox=sandbox)
+    market = ensure_spot_market(exchange, symbol)
+    report = check_api_permissions(exchange)
+    print(f"[{'LIVE' if live else 'TESTNET'}] {exchange_name} {symbol} — {report.detail}")
+    if report.can_withdraw:
+        raise SystemExit("REFUS : cette clé a le droit de RETRAIT. Recrée-la sans ce droit (docs/CLES_API.md).")
+    if report.can_withdraw is None:
+        if live:
+            raise SystemExit("REFUS : permissions de la clé non vérifiables sur cet exchange en mode réel.")
+        print("  ⚠ Permissions non vérifiables : assure-toi que la clé n'a pas le droit de retrait.")
+    if not report.ip_restricted:
+        print("  ⚠ Clé non restreinte par IP (recommandé : restreindre à l'IP de la machine du bot).")
+    ec = app.execution
+    max_capital = args.max_capital or ec.max_capital
+    broker = ExchangeBroker(exchange, symbol, max_capital, ec.max_slippage, order_timeout=ec.order_timeout)
+    broker.sync()
+    print(f"  Soldes : {broker.units:.8f} {market['base']}, {broker.cash:,.2f} {market['quote']} disponibles ; "
+          f"capital géré plafonné à {max_capital:g}")
+    print(f"  Minimums du marché : {market['limits']['amount']['min']} {market['base']}, "
+          f"montant {market['limits']['cost']['min']} {market['quote']}")
+    try:
+        fee = exchange.fetch_trading_fee(symbol)
+        taker = float(fee.get("taker") or 0)
+        print(f"  Frais de ton compte : maker {float(fee.get('maker') or 0):.3%}, taker {taker:.3%}"
+              f" (backtests : {app.backtest.fee:.3%})")
+        if taker > app.backtest.fee:
+            print("  ⚠ Frais réels supérieurs à l'hypothèse des backtests : les résultats réels seront moins bons.")
+    except ccxt.BaseError as exc:
+        print(f"  (frais non disponibles : {type(exc).__name__})")
+    return app, exchange_name, symbol, report, broker, max_capital
+
+
+def cmd_check_keys(args: argparse.Namespace) -> None:
+    _connect(args, live=args.live)
+    print("\nVérifications terminées. Aucun ordre n'a été envoyé.")
+
+
+def cmd_trade(args: argparse.Namespace) -> None:
+    app, pc, timeframe, strategy, risk, _, _ = _paper_setup(args)
+    live = args.live
+    if live and risk is None:
+        raise SystemExit("REFUS : le mode réel exige les garde-fous (--no-risk interdit avec --live).")
+    exchange_name, symbol, report, broker, max_capital = _connect(args, live)[1:]
+    if live and not confirm_live(exchange_name, symbol, max_capital, report, broker.account_value(
+            float(broker.exchange.fetch_ticker(symbol)["last"]))):
+        raise SystemExit(1)
+    db = args.db or (app.execution.live_db if live else app.execution.testnet_db)
+    _maybe_reset(db, args.reset)
+    print(f"{'LIVE — ORDRES RÉELS' if live else 'TESTNET — ordres réels sur fonds fictifs'} — "
+          f"{exchange_name} {symbol} {timeframe}, {strategy}")
+    print(f"Garde-fous : {'désactivés' if risk is None else risk}")
+    feed = MarketFeed(exchange_name, symbol, timeframe, sandbox=not live)
+    _run_trader("live" if live else "testnet", feed, broker, args, pc, strategy, risk, db, exchange_name, symbol,
+                timeframe)
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    app = load_config(DEFAULT_CONFIG_PATH)
+    default = {"paper": app.paper.db, "testnet": app.execution.testnet_db, "live": app.execution.live_db}
+    db = args.db or default[args.mode]
     if not db.exists():
-        raise SystemExit(f"Pas de journal : {db}. Lance d'abord `python -m bot paper`.")
+        raise SystemExit(f"Pas de journal : {db}. Lance d'abord le bot dans ce mode.")
     store = Store(db)
     try:
         summary = summarize(store)
@@ -331,22 +416,40 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--reports-dir", type=Path, default=Path("reports"))
     cmp.set_defaults(func=cmd_compare)
 
+    def add_realtime_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--exchange", default=None, help="défaut : trading.exchange du YAML")
+        p.add_argument("--symbol", default=None, help="défaut : trading.symbol du YAML")
+        p.add_argument("--timeframe", default=None, help="défaut : paper.timeframe du YAML")
+        p.add_argument("--strategy", choices=sorted(STRATEGIES), default=None)
+        p.add_argument("--param", action="append", default=[], help="ex. fast=5")
+        p.add_argument("--poll", type=float, default=None, help="secondes entre deux vérifications")
+        p.add_argument("--duration", type=float, default=None, help="arrêt automatique après N secondes")
+        p.add_argument("--db", type=Path, default=None)
+        p.add_argument("--no-risk", action="store_true", help="désactive les garde-fous (déconseillé, interdit en live)")
+        p.add_argument("--reset", action="store_true", help="efface le journal existant (confirmation demandée)")
+
     paper = sub.add_parser("paper", help="Paper trading temps réel (portefeuille fictif, aucun ordre réel)")
-    paper.add_argument("--exchange", default=None, help="défaut : trading.exchange du YAML")
-    paper.add_argument("--symbol", default=None, help="défaut : trading.symbol du YAML")
-    paper.add_argument("--timeframe", default=None, help="défaut : paper.timeframe du YAML")
-    paper.add_argument("--strategy", choices=sorted(STRATEGIES), default=None)
-    paper.add_argument("--param", action="append", default=[], help="ex. fast=5")
-    paper.add_argument("--poll", type=float, default=None, help="secondes entre deux vérifications")
-    paper.add_argument("--duration", type=float, default=None, help="arrêt automatique après N secondes")
-    paper.add_argument("--db", type=Path, default=None)
-    paper.add_argument("--no-risk", action="store_true", help="désactive les garde-fous (déconseillé)")
-    paper.add_argument("--reset", action="store_true", help="efface le journal existant (confirmation demandée)")
+    add_realtime_args(paper)
     paper.set_defaults(func=cmd_paper)
 
-    status = sub.add_parser("paper-status", help="Tableau de bord du paper trading")
-    status.add_argument("--db", type=Path, default=None)
-    status.set_defaults(func=cmd_paper_status)
+    trade = sub.add_parser("trade", help="Ordres réels : TESTNET par défaut ; --live = argent réel (+ confirmation)")
+    add_realtime_args(trade)
+    trade.add_argument("--live", action="store_true", help="ARGENT RÉEL. Exige en plus une confirmation tapée.")
+    trade.add_argument("--max-capital", type=float, default=None, help="défaut : execution.max_capital du YAML")
+    trade.set_defaults(func=cmd_trade)
+
+    check = sub.add_parser("check-keys", help="Vérifie clés, permissions, soldes et frais (aucun ordre)")
+    check.add_argument("--exchange", default=None)
+    check.add_argument("--symbol", default=None)
+    check.add_argument("--live", action="store_true", help="vérifie les clés réelles au lieu des clés démo")
+    check.add_argument("--max-capital", type=float, default=None)
+    check.set_defaults(func=cmd_check_keys)
+
+    for name in ("status", "paper-status"):
+        status = sub.add_parser(name, help="Tableau de bord (journal SQLite)")
+        status.add_argument("--mode", choices=["paper", "testnet", "live"], default="paper")
+        status.add_argument("--db", type=Path, default=None)
+        status.set_defaults(func=cmd_status)
     return parser
 
 

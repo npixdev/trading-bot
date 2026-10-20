@@ -6,7 +6,8 @@ import math
 
 import pandas as pd
 
-from bot.paper.store import Store
+from bot.realtime.store import Store
+from bot.realtime.trader import _migrate_state
 
 
 def _pct(x: float) -> str:
@@ -17,6 +18,7 @@ def summarize(store: Store) -> dict[str, object] | None:
     state = store.load_state()
     if state is None or state.get("started") is None:
         return None
+    state = _migrate_state(state)
     equity = store.table("equity")
     orders = store.table("orders")
     events = store.table("events")
@@ -28,6 +30,7 @@ def summarize(store: Store) -> dict[str, object] | None:
     curve = equity["equity"] if len(equity) else pd.Series([started["equity"]])
     peak = max(curve.max(), started["equity"])
     risk = state.get("risk") or {}
+    broker = state["broker"]
     return {
         "identity": state["identity"],
         "started": started["time"],
@@ -36,10 +39,10 @@ def summarize(store: Store) -> dict[str, object] | None:
         "buy_hold_return": last_price / started["price"] - 1,
         "drawdown": last_equity / peak - 1,
         "max_drawdown": float((curve / curve.cummax()).min() - 1),
-        "position_weight": state["units"] * last_price / last_equity if last_equity > 0 else 0.0,
-        "units": state["units"],
-        "cash": state["cash"],
-        "fees_paid": state["fees_paid"],
+        "position_weight": min(broker["units"] * last_price / last_equity, 1.0) if last_equity > 0 else 0.0,
+        "units": broker["units"],
+        "cash": broker["cash"],
+        "fees_paid": broker["fees_paid"],
         "stop": risk.get("stop"),
         "killed": risk.get("killed", False),
         "halted_day": risk.get("halted_day"),
@@ -58,7 +61,7 @@ def render(summary: dict[str, object]) -> str:
     ident = s["identity"]
     stop = "aucun" if s["stop"] is None else f"{s['stop']:,.2f}"
     lines = [
-        f"Paper trading {ident['exchange']} {ident['symbol']} {ident['timeframe']} — "
+        f"[{ident.get('mode', 'paper').upper()}] {ident['exchange']} {ident['symbol']} {ident['timeframe']} — "
         f"{ident['strategy']}({', '.join(f'{k}={v}' for k, v in ident['params'].items())})",
         f"Démarré le {s['started'][:19]} UTC — dernière bougie traitée : {str(s['last_bar'])[:19]}",
         "",

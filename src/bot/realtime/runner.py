@@ -10,7 +10,7 @@ from collections.abc import Callable
 import ccxt
 import pandas as pd
 
-from bot.paper.store import Store
+from bot.realtime.store import Store
 
 log = logging.getLogger(__name__)
 

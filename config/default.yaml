@@ -40,6 +40,15 @@ paper:
   risk_overrides:
     kill_switch_drawdown: 0.15  # pire DD en backtest ≈ −6 % → 15 % = la stratégie se comporte anormalement
 
+execution:
+  # Ordres réels : testnet par défaut, live uniquement avec --live + confirmation au clavier.
+  # Stratégie, timeframe et garde-fous : ceux de la section paper.
+  max_capital: 100          # USDC max gérés par le bot (le reste du compte est ignoré pour le sizing)
+  max_slippage: 0.002       # ordres limit IOC plafonnés à ask + 0,2 % (achat) / bid − 0,2 % (vente)
+  order_timeout: 15
+  testnet_db: data/testnet.sqlite
+  live_db: data/live.sqlite
+
 trading:
   # Exchange utilisé pour paper/testnet/live (étapes 5+). OKX : agréé MiCA, mode démo via ccxt.
   exchange: okx
