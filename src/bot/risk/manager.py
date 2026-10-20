@@ -123,6 +123,37 @@ class RiskManager:
                     RiskEvent(time, "daily_limit", f"perte du jour {day_return:.1%} : pause jusqu'à minuit UTC")
                 )
 
+    # --- Persistance (reprise après redémarrage) ----------------------------------------
+
+    def to_dict(self) -> dict[str, object]:
+        def ts(x: pd.Timestamp | None) -> str | None:
+            return None if x is None else x.isoformat()
+
+        return {
+            "peak_equity": None if math.isinf(self.peak_equity) else self.peak_equity,
+            "day": ts(self.day),
+            "day_start_equity": None if math.isnan(self.day_start_equity) else self.day_start_equity,
+            "halted_day": ts(self.halted_day),
+            "killed": self.killed,
+            "stop": self.stop,
+            "wait_for_flat_signal": self.wait_for_flat_signal,
+        }
+
+    @classmethod
+    def from_dict(cls, config: RiskConfig, state: dict[str, object]) -> RiskManager:
+        def ts(x: object) -> pd.Timestamp | None:
+            return None if x is None else pd.Timestamp(str(x))
+
+        m = cls(config)
+        m.peak_equity = -math.inf if state["peak_equity"] is None else float(state["peak_equity"])  # type: ignore[arg-type]
+        m.day = ts(state["day"])
+        m.day_start_equity = math.nan if state["day_start_equity"] is None else float(state["day_start_equity"])  # type: ignore[arg-type]
+        m.halted_day = ts(state["halted_day"])
+        m.killed = bool(state["killed"])
+        m.stop = None if state["stop"] is None else float(state["stop"])  # type: ignore[arg-type]
+        m.wait_for_flat_signal = bool(state["wait_for_flat_signal"])
+        return m
+
     def reset_kill_switch(self) -> None:
         """Relance manuelle, après analyse humaine de ce qui s'est passé."""
         self.killed = False

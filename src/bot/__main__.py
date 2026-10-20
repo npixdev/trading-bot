@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import logging
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,9 @@ from bot.config import DEFAULT_CONFIG_PATH, BacktestConfig, RiskConfig, load_con
 from bot.data import cache_path, create_exchange, find_gaps, load_cache, update_ohlcv
 from bot.data.quality import find_invalid_rows
 from bot.data.resample import resample_ohlcv
+from bot.paper import MarketFeed, PaperTrader, Store, run_loop
+from bot.paper.status import render, summarize
+from bot.paper.trader import ConfigMismatch, make_identity
 from bot.report import run_comparison, verdict, write_report
 from bot.strategies import STRATEGIES, BuyAndHold
 
@@ -213,6 +217,57 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print(f"\nRapport : {path.resolve()}")
 
 
+def _paper_setup(args: argparse.Namespace):  # noqa: ANN202
+    app = load_config(DEFAULT_CONFIG_PATH)
+    pc = app.paper
+    timeframe = args.timeframe or pc.timeframe
+    strategy_name = args.strategy or pc.strategy
+    params = {**(pc.params if strategy_name == pc.strategy else {}), **_parse_params(args.param)}
+    strategy = STRATEGIES[strategy_name](**params)
+    risk = replace(app.risk, **pc.risk_overrides) if pc.use_risk and not args.no_risk else None
+    costs = replace(app.backtest, initial_cash=pc.initial_cash)
+    db = args.db or pc.db
+    return app, pc, timeframe, strategy, risk, costs, db
+
+
+def cmd_paper(args: argparse.Namespace) -> None:
+    app, pc, timeframe, strategy, risk, costs, db = _paper_setup(args)
+    exchange, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
+    if args.reset and db.exists():
+        answer = input(f"Supprimer le journal de paper trading {db} ? Tape 'oui' pour confirmer : ")
+        if answer.strip().lower() != "oui":
+            raise SystemExit("Annulé.")
+        db.unlink()
+    print(f"PAPER TRADING (aucun ordre réel) — {exchange} {symbol} {timeframe}, {strategy}")
+    print(f"Garde-fous : {'désactivés' if risk is None else risk}")
+    print(f"Journal : {db.resolve()}  |  Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
+
+    feed = MarketFeed(exchange, symbol, timeframe)
+    store = Store(db)
+    try:
+        identity = make_identity(exchange, symbol, timeframe, strategy, risk)
+        trader = PaperTrader(feed, store, strategy, costs, risk, identity, warmup_bars=pc.warmup_bars)
+    except ConfigMismatch as exc:
+        store.close()
+        raise SystemExit(str(exc)) from None
+    try:
+        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration)
+    finally:
+        store.close()
+
+
+def cmd_paper_status(args: argparse.Namespace) -> None:
+    db =args.db or load_config(DEFAULT_CONFIG_PATH).paper.db
+    if not db.exists():
+        raise SystemExit(f"Pas de journal : {db}. Lance d'abord `python -m bot paper`.")
+    store = Store(db)
+    try:
+        summary = summarize(store)
+        print("Journal vide." if summary is None else render(summary))
+    finally:
+        store.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     app_cfg = load_config(DEFAULT_CONFIG_PATH)
     cfg = app_cfg.data
@@ -275,6 +330,23 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--slippage", type=float, default=None)
     cmp.add_argument("--reports-dir", type=Path, default=Path("reports"))
     cmp.set_defaults(func=cmd_compare)
+
+    paper = sub.add_parser("paper", help="Paper trading temps réel (portefeuille fictif, aucun ordre réel)")
+    paper.add_argument("--exchange", default=None, help="défaut : trading.exchange du YAML")
+    paper.add_argument("--symbol", default=None, help="défaut : trading.symbol du YAML")
+    paper.add_argument("--timeframe", default=None, help="défaut : paper.timeframe du YAML")
+    paper.add_argument("--strategy", choices=sorted(STRATEGIES), default=None)
+    paper.add_argument("--param", action="append", default=[], help="ex. fast=5")
+    paper.add_argument("--poll", type=float, default=None, help="secondes entre deux vérifications")
+    paper.add_argument("--duration", type=float, default=None, help="arrêt automatique après N secondes")
+    paper.add_argument("--db", type=Path, default=None)
+    paper.add_argument("--no-risk", action="store_true", help="désactive les garde-fous (déconseillé)")
+    paper.add_argument("--reset", action="store_true", help="efface le journal existant (confirmation demandée)")
+    paper.set_defaults(func=cmd_paper)
+
+    status = sub.add_parser("paper-status", help="Tableau de bord du paper trading")
+    status.add_argument("--db", type=Path, default=None)
+    status.set_defaults(func=cmd_paper_status)
     return parser
 
 
@@ -282,8 +354,9 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s UTC %(levelname)s %(message)s",
     )
+    logging.Formatter.converter = time.gmtime  # même fuseau que les bougies et le journal SQLite
     args.func(args)
 
 

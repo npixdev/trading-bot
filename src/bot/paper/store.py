@@ -1,0 +1,101 @@
+"""Journal SQLite : décisions, ordres, equity, événements, et état pour la reprise."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY, time TEXT NOT NULL, bar_time TEXT NOT NULL, close REAL, signal REAL,
+    current_weight REAL, target_weight REAL, equity REAL, note TEXT
+);
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY, time TEXT NOT NULL, side TEXT NOT NULL, qty REAL, price REAL, fee REAL,
+    bid REAL, ask REAL, reason TEXT
+);
+CREATE TABLE IF NOT EXISTS equity (
+    id INTEGER PRIMARY KEY, time TEXT NOT NULL, equity REAL, cash REAL, units REAL, price REAL
+);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY, time TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT
+);
+"""
+
+
+def _iso(t: pd.Timestamp) -> str:
+    return pd.Timestamp(t).isoformat()
+
+
+class Store:
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self.conn = sqlite3.connect(path)
+        self.conn.executescript(SCHEMA)
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
+
+    # --- État ----------------------------------------------------------------------------
+
+    def load_state(self) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT value FROM state WHERE key = 'trader'").fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def save_state(self, state: dict[str, Any]) -> None:
+        self.conn.execute(
+            "INSERT INTO state (key, value) VALUES ('trader', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (json.dumps(state),),
+        )
+
+    def commit(self) -> None:
+        """Valide d'un bloc tout ce qui a été écrit depuis le dernier commit (état + journal)."""
+        self.conn.commit()
+
+    # --- Journal -------------------------------------------------------------------------
+
+    def log_decision(self, time: pd.Timestamp, bar_time: pd.Timestamp, close: float, signal: float,
+                     current_weight: float, target_weight: float, equity: float, note: str = "") -> None:
+        self.conn.execute(
+            "INSERT INTO decisions (time, bar_time, close, signal, current_weight, target_weight, equity, note)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (_iso(time), _iso(bar_time), close, signal, current_weight, target_weight, equity, note),
+        )
+
+    def log_order(self, order: dict[str, object], bid: float, ask: float, reason: str) -> None:
+        self.conn.execute(
+            "INSERT INTO orders (time, side, qty, price, fee, bid, ask, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (_iso(order["time"]), order["side"], order["qty"], order["price"], order["fee"], bid, ask, reason),  # type: ignore[arg-type]
+        )
+
+    def log_equity(self, time: pd.Timestamp, equity: float, cash: float, units: float, price: float) -> None:
+        self.conn.execute(
+            "INSERT INTO equity (time, equity, cash, units, price) VALUES (?, ?, ?, ?, ?)",
+            (_iso(time), equity, cash, units, price),
+        )
+
+    def log_event(self, time: pd.Timestamp, kind: str, detail: str, commit: bool = False) -> None:
+        self.conn.execute(
+            "INSERT INTO events (time, kind, detail) VALUES (?, ?, ?)", (_iso(time), kind, detail)
+        )
+        if commit:
+            self.conn.commit()
+
+    # --- Lecture -------------------------------------------------------------------------
+
+    def table(self, name: str, limit: int | None = None) -> pd.DataFrame:
+        if name not in ("decisions", "orders", "equity", "events"):
+            raise ValueError(name)
+        query = f"SELECT * FROM {name} ORDER BY id"  # noqa: S608 (nom de table validé ci-dessus)
+        df = pd.read_sql_query(query, self.conn)
+        if "time" in df:
+            df["time"] = pd.to_datetime(df["time"], utc=True, format="ISO8601")
+        return df if limit is None else df.tail(limit)

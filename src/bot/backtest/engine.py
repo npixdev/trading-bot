@@ -23,6 +23,7 @@ import pandas as pd
 
 from bot.backtest.metrics import Metrics, compute_metrics
 from bot.config import BacktestConfig, RiskConfig
+from bot.portfolio import Portfolio, make_trade
 from bot.risk.manager import RiskManager
 from bot.strategies.base import Strategy
 from bot.strategies.indicators import atr as compute_atr
@@ -43,66 +44,6 @@ class BacktestResult:
         self.metrics = compute_metrics(
             self.equity, self.initial_cash, self.trades, self.position, self.fees_paid
         )
-
-
-class _Portfolio:
-    """Cash + unités détenues, avec journal des ordres et des allers-retours."""
-
-    def __init__(self, cash: float, fee: float, slippage: float) -> None:
-        self.cash, self.units = cash, 0.0
-        self.fee, self.slippage = fee, slippage
-        self.fees_paid = 0.0
-        self.fills: list[dict[str, object]] = []
-        self.trades: list[dict[str, object]] = []
-        self.entry: tuple[pd.Timestamp, float] | None = None
-
-    def value(self, price: float) -> float:
-        return self.cash + self.units * price
-
-    def rebalance(self, time: pd.Timestamp, price: float, weight: float) -> float | None:
-        """Ajuste la position vers `weight` au prix `price` (avant slippage). Renvoie le prix d'exécution."""
-        equity = self.value(price)
-        delta = weight * equity - self.units * price
-        if delta > 0:
-            fill = price * (1 + self.slippage)
-            notional = min(delta, self.cash / (1 + self.fee))
-            qty = notional / fill
-            cost = notional * self.fee
-            self.cash -= notional + cost
-            self.units += qty
-            side = "buy"
-            if self.entry is None:
-                self.entry = (time, equity)
-        elif delta < 0:
-            qty = self.units if weight == 0 else min(-delta / price, self.units)
-            fill = price * (1 - self.slippage)
-            proceeds = qty * fill
-            cost = proceeds * self.fee
-            self.cash += proceeds - cost
-            self.units -= qty
-            side = "sell"
-        else:
-            return None
-        self.fees_paid += cost
-        self.fills.append(dict(time=time, side=side, qty=qty, price=fill, fee=cost))
-        if weight == 0 and self.entry is not None:
-            self.trades.append(_trade(self.entry, time, self.cash, is_open=False))
-            self.entry = None
-        return fill
-
-
-def _trade(
-    entry: tuple[pd.Timestamp, float], exit_time: pd.Timestamp | None, exit_equity: float, is_open: bool
-) -> dict[str, object]:
-    entry_time, entry_equity = entry
-    return {
-        "entry_time": entry_time,
-        "exit_time": exit_time,
-        "entry_equity": entry_equity,
-        "exit_equity": exit_equity,
-        "return": exit_equity / entry_equity - 1,
-        "open": is_open,
-    }
 
 
 def simulate(
@@ -132,7 +73,7 @@ def simulate(
         else np.full(len(data), np.nan)
     )
 
-    book = _Portfolio(config.initial_cash, config.fee, config.slippage)
+    book = Portfolio(config.initial_cash, config.fee, config.slippage)
     current_w = 0.0
     equity = np.empty(len(data))
     applied = np.empty(len(data))
@@ -144,9 +85,9 @@ def simulate(
             manager.on_bar_open(t, book.value(o))
             wi = manager.target_weight(wi, current_w, o, atr_prev[i])
         if wi != current_w:
-            fill = book.rebalance(t, o, wi)
-            if manager is not None and current_w == 0 and wi > 0 and fill is not None:
-                manager.on_entry(fill, atr_prev[i])
+            order = book.rebalance(t, o, wi)
+            if manager is not None and current_w == 0 and wi > 0 and order is not None:
+                manager.on_entry(float(order["price"]), atr_prev[i])  # type: ignore[arg-type]
             elif manager is not None and wi == 0:
                 manager.on_exit()
             current_w = wi
@@ -166,7 +107,7 @@ def simulate(
             manager.on_bar_close(t, equity[i])
 
     if book.entry is not None:
-        book.trades.append(_trade(book.entry, None, float(equity[-1]), is_open=True))
+        book.trades.append(make_trade(book.entry, None, float(equity[-1]), is_open=True))
 
     events = pd.DataFrame(
         [vars(e) for e in manager.events] if manager else [], columns=["time", "kind", "detail"]

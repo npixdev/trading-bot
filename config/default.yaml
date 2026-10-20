@@ -27,6 +27,19 @@ risk:
   daily_loss_limit: 0.05    # −5 % depuis minuit UTC → tout vendre, pause jusqu'au lendemain
   kill_switch_drawdown: 0.30  # −30 % depuis le plus haut → tout vendre, arrêt définitif
 
+paper:
+  # Paper trading : prix réels de trading.exchange, portefeuille fictif, AUCUN ordre envoyé.
+  timeframe: 1d
+  strategy: sma
+  params: {fast: 20, slow: 100}
+  initial_cash: 10000
+  poll_seconds: 60          # fréquence de vérification du prix (stop-loss) et des nouvelles bougies
+  warmup_bars: 300          # historique chargé pour les indicateurs (≥ plus longue fenêtre + marge)
+  db: data/paper.sqlite
+  use_risk: true
+  risk_overrides:
+    kill_switch_drawdown: 0.15  # pire DD en backtest ≈ −6 % → 15 % = la stratégie se comporte anormalement
+
 trading:
   # Exchange utilisé pour paper/testnet/live (étapes 5+). OKX : agréé MiCA, mode démo via ccxt.
   exchange: okx

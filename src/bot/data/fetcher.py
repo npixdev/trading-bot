@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Iterator
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 import ccxt
 
 log = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class OHLCVSource(Protocol):
@@ -36,6 +37,25 @@ def timeframe_ms(timeframe: str) -> int:
     return int(ccxt.Exchange.parse_timeframe(timeframe) * 1000)
 
 
+def call_with_retry(
+    fn: Callable[[], T], max_retries: int = 5, sleep: Callable[[float], None] = time.sleep
+) -> T:
+    """Réessaie sur erreur réseau / rate limit avec attente exponentielle (1s, 2s, 4s…).
+
+    Les autres erreurs (paire inconnue, requête invalide…) remontent immédiatement.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except ccxt.NetworkError as exc:  # inclut RateLimitExceeded, RequestTimeout, DDoSProtection
+            if attempt == max_retries:
+                raise
+            delay = 2**attempt
+            log.warning("Erreur réseau (%s), nouvel essai dans %ss", type(exc).__name__, delay)
+            sleep(delay)
+    raise AssertionError("inatteignable")
+
+
 def _fetch_with_retry(
     source: OHLCVSource,
     symbol: str,
@@ -45,17 +65,9 @@ def _fetch_with_retry(
     max_retries: int,
     sleep: Callable[[float], None],
 ) -> list[list[Any]]:
-    """Réessaie sur erreur réseau / rate limit avec attente exponentielle (1s, 2s, 4s…)."""
-    for attempt in range(max_retries + 1):
-        try:
-            return source.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
-        except ccxt.NetworkError as exc:  # inclut RateLimitExceeded, RequestTimeout, DDoSProtection
-            if attempt == max_retries:
-                raise
-            delay = 2**attempt
-            log.warning("Erreur réseau (%s), nouvel essai dans %ss", type(exc).__name__, delay)
-            sleep(delay)
-    raise AssertionError("inatteignable")
+    return call_with_retry(
+        lambda: source.fetch_ohlcv(symbol, timeframe, since=since, limit=limit), max_retries, sleep
+    )
 
 
 def fetch_ohlcv_pages(

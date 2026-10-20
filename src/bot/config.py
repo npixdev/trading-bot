@@ -74,11 +74,27 @@ class RiskConfig:
 
 
 @dataclass(frozen=True)
+class PaperConfig:
+    """Paper trading : vrais prix en temps réel, portefeuille fictif, aucun ordre envoyé."""
+
+    timeframe: str = "1d"
+    strategy: str = "sma"
+    params: dict[str, Any] = field(default_factory=lambda: {"fast": 20, "slow": 100})
+    initial_cash: float = 10_000.0
+    poll_seconds: float = 60.0
+    warmup_bars: int = 300  # bougies clôturées chargées pour calculer les indicateurs
+    db: Path = Path("data/paper.sqlite")
+    use_risk: bool = True
+    risk_overrides: dict[str, Any] = field(default_factory=lambda: {"kill_switch_drawdown": 0.15})
+
+
+@dataclass(frozen=True)
 class AppConfig:
     data: DataConfig = field(default_factory=DataConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    paper: PaperConfig = field(default_factory=PaperConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
@@ -96,4 +112,12 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         trading=TradingConfig(**(raw.get("trading") or {})),
         backtest=BacktestConfig(**(raw.get("backtest") or {})),
         risk=RiskConfig(**(raw.get("risk") or {})),
+        paper=_paper(raw.get("paper") or {}),
     )
+
+
+def _paper(raw: dict[str, Any]) -> PaperConfig:
+    raw = dict(raw)
+    if "db" in raw:
+        raw["db"] = Path(raw["db"])
+    return PaperConfig(**raw)

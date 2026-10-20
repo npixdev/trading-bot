@@ -25,6 +25,10 @@ Amplitude moyenne d'une bougie sur les N dernières (gaps compris). Mesure de la
 Simulation d'une stratégie sur des données passées, bougie par bougie, avec frais et slippage. Toujours plus optimiste que la réalité : c'est un filtre pour éliminer les mauvaises idées, pas une promesse.
 *Ex. : une stratégie qui fait −57 % en backtest fera presque sûrement pire en réel. Une qui fait +800 % doit d'abord être soupçonnée.*
 
+**Attente exponentielle (*backoff*)** [5]
+Après une erreur réseau, attendre de plus en plus longtemps avant de réessayer, pour ne pas marteler un exchange en difficulté (et se faire bannir).
+*Ex. : vérification toutes les 10 s ; après 3 échecs : attentes de 20 s, 40 s, 80 s, puis reconnexion.*
+
 **Base / Quote** [0]
 Dans la paire `BTC/EUR`, BTC est la **base** (ce que tu achètes), EUR la **quote** (ce avec quoi tu paies).
 *Ex. : BTC/EUR = 60 000 → 1 BTC coûte 60 000 €.*
@@ -170,6 +174,10 @@ Ordre dormant qui se déclenche quand le prix atteint un seuil, pour couper une 
 Stop qui, une fois déclenché, place un ordre limit au lieu d'un market. Risque : ne pas être exécuté si le prix chute trop vite.
 *Ex. : stop 57 000 €, limit 56 900 €. Le BTC passe de 57 100 € à 55 000 € en une minute → ton ordre à 56 900 € n'est jamais rempli, tu es toujours en position et ta perte continue.*
 
+**Paper trading** [5]
+Faire tourner le bot en temps réel sur les vrais prix, avec un portefeuille fictif : aucun ordre n'est envoyé. Teste la mécanique (données, signaux, garde-fous, pannes) sans risquer d'argent.
+*Ex. : le bot « achète » 0,02 BTC au meilleur ask du moment (81 837,40 $) + slippage + frais ; seul le journal SQLite change.*
+
 **Pagination** [1]
 L'API ne renvoie qu'un nombre limité de bougies par requête (~1 000 sur Binance, 100 à 300 sur OKX). Pour tout l'historique, on enchaîne les requêtes en avançant le point de départ.
 *Ex. : 2021-01-01 → 2026-10-18 en 1h ≈ 50 800 bougies ≈ 51 requêtes sur Binance.*
@@ -188,6 +196,10 @@ Quantité disponible dans le carnet à chaque niveau de prix.
 **Rate limit (limite de débit)** [1]
 Nombre maximum de requêtes autorisées par l'exchange sur une période. Au-delà : erreur, puis bannissement temporaire de ton IP ou de ta clé. ccxt espace automatiquement les requêtes (`enableRateLimit`).
 *Ex. : si l'exchange autorise ~20 requêtes/s et que ton bot en envoie 100 d'un coup, il peut être bloqué plusieurs minutes, au pire moment (pendant un krach).*
+
+**Reprise d'état** [5]
+Après un arrêt (crash, redémarrage), le bot recharge exactement son état : cash, BTC détenu, stop en cours, kill switch, dernière bougie traitée. Il ne rejoue pas les décisions manquées : on ne peut pas trader dans le passé.
+*Ex. : arrêt de 5 h en 1h → au redémarrage, une seule décision (celle du moment) et une note « 5 bougie(s) non traitée(s) ».*
 
 **Retour à la moyenne (*mean reversion*)** [3]
 Pari qu'un prix qui s'est beaucoup éloigné de sa moyenne va y revenir. Gagne souvent un peu, perd parfois beaucoup (quand la chute continue).
