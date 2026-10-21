@@ -6,7 +6,17 @@ import pandas as pd
 import pytest
 import requests
 
-from bot.monitoring import Alerts, DailySummary, NullNotifier, TelegramNotifier, check_health, notifier_from_env
+from bot.monitoring import (
+    Alerts,
+    DailySummary,
+    NullNotifier,
+    TelegramCommands,
+    TelegramNotifier,
+    check_health,
+    notifier_from_env,
+)
+from bot.monitoring.alerts import status_text
+from bot.monitoring.charts import equity_chart
 from bot.realtime import Store
 from bot.realtime.runner import HEARTBEAT_KEY, run_loop
 from tests.test_paper import FakeClock, FakeFeed, FlakyTrader, _closes, _trader
@@ -17,9 +27,14 @@ class Outbox:
 
     def __init__(self) -> None:
         self.messages: list[str] = []
+        self.photos: list[tuple[bytes, str]] = []
 
     def send(self, text: str) -> bool:
         self.messages.append(text)
+        return True
+
+    def send_photo(self, png: bytes, caption: str = "") -> bool:
+        self.photos.append((png, caption))
         return True
 
 
@@ -41,7 +56,24 @@ def test_telegram_posts_message_to_chat() -> None:
     url, kw = calls[0]
     assert url == "https://api.telegram.org/bot123:ABC/sendMessage"
     assert kw["json"]["chat_id"] == "42" and kw["json"]["text"] == "bonjour"
+    assert kw["json"]["parse_mode"] == "HTML"
     assert kw["timeout"] > 0
+
+
+def test_telegram_sends_photo_with_caption() -> None:
+    calls = []
+    notifier = TelegramNotifier("t", "42", post=lambda url, **kw: calls.append((url, kw)) or FakeResponse())
+    assert notifier.send_photo(b"\x89PNG...", "légende " * 300)
+    url, kw = calls[0]
+    assert url.endswith("/sendPhoto")
+    assert kw["files"]["photo"][1] == b"\x89PNG..." and kw["data"]["chat_id"] == "42"
+    assert len(kw["data"]["caption"]) <= 1024
+
+
+def test_dynamic_text_is_escaped_for_telegram_html() -> None:
+    out = Outbox()
+    Alerts(out, "PAPER")("event", {"time": None, "kind": "order_rejected", "detail": "erreur <code> & x>1"})
+    assert "&lt;code&gt; &amp; x&gt;1" in out.messages[0]  # sinon Telegram refuserait le message
 
 
 def test_telegram_failure_never_raises_nor_leaks_token(caplog) -> None:
@@ -63,8 +95,8 @@ def test_long_messages_are_truncated() -> None:
 
 def test_find_chat_ids_from_updates() -> None:
     payload = {"result": [{"message": {"chat": {"id": 42, "first_name": "Moi"}}}, {"message": {"chat": {"id": 42}}}]}
-    notifier = TelegramNotifier("t", "")
-    assert notifier.find_chat_ids(get=lambda url, **kw: FakeResponse(payload=payload)) == [("42", "Moi")]
+    notifier = TelegramNotifier("t", "", get=lambda url, **kw: FakeResponse(payload=payload))
+    assert notifier.find_chat_ids() == [("42", "Moi")]
 
 
 def test_notifier_from_env(tmp_path: Path, monkeypatch) -> None:
@@ -87,8 +119,14 @@ def test_orders_and_critical_events_are_sent_immediately() -> None:
     alerts("event", {"time": None, "kind": "kill_switch", "detail": "drawdown -15,2 %"})
     alerts("event", {"time": None, "kind": "crash", "detail": "ZeroDivisionError"})
     assert len(out.messages) == 3
-    assert "ACHAT 0.00100000 à 82,000.00" in out.messages[0] and out.messages[0].startswith("[TESTNET")
-    assert "KILL SWITCH" in out.messages[1] and "CRASH" in out.messages[2]
+    buy = out.messages[0]
+    assert buy.startswith("🟢 <b>ACHAT</b>") and "82 000.00" in buy and "TESTNET binance" in buy
+    assert "signal de la stratégie" in buy
+    assert "🛑" in out.messages[1] and "KILL SWITCH" in out.messages[1]
+    assert "💥" in out.messages[2] and "CRASH" in out.messages[2]
+    alerts = Alerts(out, "X")
+    alerts("order", {"side": "sell", "qty": 0.001, "price": 81_000.0, "fee": 0.08, "reason": "stop"})
+    assert out.messages[-1].startswith("🔴 <b>VENTE</b>") and "stop-loss" in out.messages[-1]
 
 
 def test_repeated_network_errors_are_throttled() -> None:
@@ -152,9 +190,10 @@ def test_daily_summary_sent_once_per_day(tmp_path: Path) -> None:
     assert daily.maybe_send(day1 + pd.Timedelta(hours=5)) is False
     assert daily.maybe_send(pd.Timestamp("2021-01-02 00:01", tz="UTC")) is True
     assert daily.maybe_send(pd.Timestamp("2021-01-02 18:00", tz="UTC")) is False
-    assert len(out.messages) == 1
-    text = out.messages[0]
-    assert "Résumé du 2021-01-01" in text and "Buy & hold" in text and "Ordres du jour : 1" in text
+    assert len(out.photos) == 1 and out.messages == []  # graphique + légende, en un seul message
+    png, caption = out.photos[0]
+    assert png.startswith(b"\x89PNG")
+    assert "Résumé du 01/01/2021" in caption and "Buy &amp; hold" in caption and "1 ordre(s)" in caption
 
 
 def test_daily_summary_not_duplicated_after_restart(tmp_path: Path) -> None:
@@ -163,7 +202,85 @@ def test_daily_summary_not_duplicated_after_restart(tmp_path: Path) -> None:
     daily.maybe_send(pd.Timestamp("2021-01-02 00:01", tz="UTC"))
     again = DailySummary(store, out, "PAPER")  # même journal, nouvel objet (= redémarrage)
     assert again.maybe_send(pd.Timestamp("2021-01-02 09:00", tz="UTC")) is False
-    assert len(out.messages) == 1
+    assert len(out.photos) == 1
+
+
+# --- Graphique et commandes ---------------------------------------------------------------------------
+
+
+def test_equity_chart_is_a_png_with_orders(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    png = equity_chart(store, "PAPER fake BTC/USDC 1h")
+    assert png is not None and png.startswith(b"\x89PNG") and len(png) > 10_000
+
+
+def test_equity_chart_needs_data(tmp_path: Path) -> None:
+    assert equity_chart(Store(tmp_path / "vide.sqlite"), "x") is None
+
+
+def test_status_text_is_readable(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    text = status_text(store, "PAPER")
+    assert "💰" in text and "Buy &amp; hold" in text and "▰" in text and "Garde-fous" in text
+
+
+class FakeTelegram(TelegramNotifier):
+    """Vrai TelegramNotifier, mais réseau simulé : messages entrants programmables, sorties capturées."""
+
+    def __init__(self, chat_id: str = "42") -> None:
+        super().__init__("t", chat_id)
+        self.inbox: list[dict] = []
+        self.texts: list[str] = []
+        self.photos: list[str] = []
+
+    def get_updates(self, offset=None):
+        return [u for u in self.inbox if offset is None or u["update_id"] >= offset]
+
+    def send(self, text: str) -> bool:
+        self.texts.append(text)
+        return True
+
+    def send_photo(self, png: bytes, caption: str = "") -> bool:
+        self.photos.append(caption)
+        return True
+
+
+def _msg(update_id: int, text: str, chat: str = "42") -> dict:
+    return {"update_id": update_id, "message": {"chat": {"id": int(chat)}, "text": text}}
+
+
+def test_status_command_replies_with_chart(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    tg = FakeTelegram()
+    tg.inbox = [_msg(1, "/status"), _msg(2, "/aide")]
+    commands = TelegramCommands(tg, store, "PAPER", min_interval=0)
+    assert commands.poll() == 2
+    assert len(tg.photos) == 1 and "État du bot" in tg.photos[0]
+    assert "Commandes disponibles" in tg.texts[0]
+    assert commands.poll() == 0  # déjà traitées : l'offset est mémorisé dans le journal
+    again = TelegramCommands(tg, store, "PAPER", min_interval=0)  # après redémarrage
+    assert again.poll() == 0
+
+
+def test_commands_from_other_chats_are_ignored(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    tg = FakeTelegram(chat_id="42")
+    tg.inbox = [_msg(1, "/status", chat="666")]  # quelqu'un d'autre a trouvé le bot
+    assert TelegramCommands(tg, store, "PAPER", min_interval=0).poll() == 0
+    assert tg.photos == [] and tg.texts == []
+
+
+def test_commands_are_rate_limited_and_inactive_without_telegram(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    clock = FakeClock()
+    tg = FakeTelegram()
+    commands = TelegramCommands(tg, store, "PAPER", min_interval=20, clock=clock)
+    commands.poll()
+    tg.inbox = [_msg(5, "/status")]
+    assert commands.poll() == 0  # moins de 20 s : pas de nouvelle lecture
+    clock.sleep(21)
+    assert commands.poll() == 1
+    assert TelegramCommands(NullNotifier(), store, "PAPER").poll() == 0
 
 
 # --- Heartbeat ------------------------------------------------------------------------------------------

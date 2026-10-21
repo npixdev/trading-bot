@@ -114,6 +114,7 @@ Refusé si : la clé a le droit de retrait, les permissions sont invérifiables,
 
 ```powershell
 python -m bot test-alert                         # envoie une alerte Telegram de test
+python -m bot test-alert --db data/testnet.sqlite   # envoie l'état + le graphique de ce journal
 python -m bot health --mode paper                # code 0 si le bot est vivant (heartbeat < 10 min)
 ```
 
@@ -122,7 +123,18 @@ python -m bot health --mode paper                # code 0 si le bot est vivant (
 Le bot envoie :
 - **immédiatement** : chaque ordre, stop-loss, limite journalière, kill switch, crash, ordre rejeté/abandonné/non confirmé, écart avec le solde réel, démarrage/arrêt ;
 - **au plus une fois par 30 min et par type** : erreurs réseau, exécutions partielles, resynchronisations d'horloge (avec le nombre d'occurrences regroupées) ;
-- **chaque jour** (premier tour de boucle après minuit UTC) : valeur du portefeuille, rendement du jour et depuis le début, buy & hold, position, ordres et événements de la veille.
+- **chaque jour** (premier tour de boucle après minuit UTC) : un **graphique** (valeur du bot vs buy & hold, ▲ achats / ▼ ventes, périodes investies surlignées, drawdown) avec en légende la valeur du portefeuille, le rendement du jour et depuis le début, la position et l'état des garde-fous.
+
+Messages mis en forme : 🟢 achat, 🔴 vente, 🛑 kill switch, ⚠️ anomalie, ✅ démarrage — toujours accompagnés d'un mot, jamais la couleur seule.
+
+**Commandes à taper dans la conversation Telegram** (lues toutes les ~20 s pendant que le bot tourne) :
+
+| Commande | Réponse |
+|---|---|
+| `/status` | état du bot + graphique, tout de suite |
+| `/aide` | liste des commandes |
+
+Elles sont **en lecture seule** (aucune ne peut faire trader le bot) et ne sont acceptées **que depuis ta conversation** (`TELEGRAM_CHAT_ID`) : si quelqu'un d'autre trouve ton bot, il est ignoré.
 
 Une alerte qui échoue (Telegram injoignable) est journalisée et **n'interrompt jamais le trading**. Sans configuration, le bot tourne normalement, sans alertes.
 

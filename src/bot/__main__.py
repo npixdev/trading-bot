@@ -30,7 +30,15 @@ from bot.execution import (
     load_api_keys,
 )
 from bot.execution.live_guard import confirm_live
-from bot.monitoring import Alerts, DailySummary, TelegramNotifier, check_health, notifier_from_env
+from bot.monitoring import (
+    Alerts,
+    DailySummary,
+    TelegramCommands,
+    TelegramNotifier,
+    check_health,
+    notifier_from_env,
+    send_status,
+)
 from bot.realtime import MarketFeed, Store, Trader, run_loop
 from bot.realtime.status import render, summarize
 from bot.realtime.trader import ConfigMismatch, make_identity
@@ -266,8 +274,14 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
     print(f"Journal : {db.resolve()}  |  alertes Telegram : {'actives' if alerts_on else 'non configurées'}")
     print("Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
     daily = DailySummary(store, notifier, label)
+    commands = TelegramCommands(notifier, store, label)
+
+    def on_step(now: pd.Timestamp) -> None:
+        daily.maybe_send(now)
+        commands.poll(now)
+
     try:
-        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration, on_step=daily.maybe_send)
+        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration, on_step=on_step)
     finally:
         store.close()
 
@@ -275,9 +289,22 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
 def cmd_test_alert(args: argparse.Namespace) -> None:
     notifier = notifier_from_env()
     if isinstance(notifier, TelegramNotifier):
-        if not notifier.send("✅ Test d'alerte du bot de trading : la configuration Telegram fonctionne."):
-            raise SystemExit("Échec de l'envoi : vérifie TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.")
-        print(f"Message de test envoyé à la conversation {notifier.chat_id} : vérifie Telegram.")
+        if args.db is None:
+            if not notifier.send("✅ <b>Test d'alerte</b>\nLa configuration Telegram du bot de trading fonctionne."):
+                raise SystemExit("Échec de l'envoi : vérifie TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.")
+            print(f"Message de test envoyé à la conversation {notifier.chat_id} : vérifie Telegram.")
+            return
+        if not args.db.exists():
+            raise SystemExit(f"Pas de journal : {args.db}")
+        store = Store(args.db)
+        try:
+            state = store.load_state() or {}
+            ident = state.get("identity") or {}
+            label = f"{ident.get('mode', 'paper').upper()} {ident.get('exchange')} {ident.get('symbol')} {ident.get('timeframe')}"
+            ok = send_status(store, notifier, label)
+        finally:
+            store.close()
+        print("État + graphique envoyés : vérifie Telegram." if ok else "Échec de l'envoi.")
         return
     load_dotenv(Path(".env"))
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -509,6 +536,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.set_defaults(func=cmd_check_keys)
 
     alert = sub.add_parser("test-alert", help="Envoie une alerte Telegram de test (ou aide à trouver TELEGRAM_CHAT_ID)")
+    alert.add_argument("--db", type=Path, default=None, help="envoie l'état + le graphique de ce journal")
     alert.set_defaults(func=cmd_test_alert)
 
     health = sub.add_parser("health", help="Code 0 si le bot est vivant (heartbeat récent), 1 sinon")
