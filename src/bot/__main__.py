@@ -275,8 +275,10 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
 def cmd_test_alert(args: argparse.Namespace) -> None:
     notifier = notifier_from_env()
     if isinstance(notifier, TelegramNotifier):
-        ok = notifier.send("✅ Test d'alerte du bot de trading : la configuration Telegram fonctionne.")
-        raise SystemExit(0 if ok else "Échec de l'envoi : vérifie TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.")
+        if not notifier.send("✅ Test d'alerte du bot de trading : la configuration Telegram fonctionne."):
+            raise SystemExit("Échec de l'envoi : vérifie TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.")
+        print(f"Message de test envoyé à la conversation {notifier.chat_id} : vérifie Telegram.")
+        return
     load_dotenv(Path(".env"))
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
