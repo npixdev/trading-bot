@@ -71,6 +71,7 @@ class Trader:
         self.started: dict[str, Any] | None = None
         self._reconciled = False
         self._warned_history = False
+        self.signal_info: dict[str, Any] | None = None  # explication de la décision, pour Telegram
         state = store.load_state()
         if state is not None:
             state = _migrate_state(state)
@@ -97,6 +98,7 @@ class Trader:
             "last_bar": None if self.last_bar is None else self.last_bar.isoformat(),
             "risk": None if self.risk is None else self.risk.to_dict(),
             "started": self.started,
+            "signal_info": self.signal_info,
         }
 
     def _restore(self, s: dict[str, Any]) -> None:
@@ -106,6 +108,7 @@ class Trader:
         if self.risk_config is not None and s["risk"] is not None:
             self.risk = RiskManager.from_dict(self.risk_config, s["risk"])
         self.started = s["started"]
+        self.signal_info = s.get("signal_info")
 
     def _flush(self) -> None:
         """Écrit les événements de risque en attente + l'état, puis valide la transaction."""
@@ -146,7 +149,10 @@ class Trader:
             self._on_new_bar(now, candles, quote)
         elif self.pending is not None:
             self._retry(now, quote)
+        if self.signal_info is None:  # journal plus ancien que cette fonctionnalité, ou premier démarrage
+            self.signal_info = self.strategy.explain(candles)
         self._check_stop(now, quote)
+        self.store.set_meta("last_price", json.dumps({"time": now.isoformat(), "price": quote.mid}))
         self._flush()
 
     def _log_broker_notes(self, now: pd.Timestamp) -> None:
@@ -180,6 +186,7 @@ class Trader:
         signal = float(min(max(self.strategy.target_position(candles).iloc[-1], 0.0), 1.0))
         if math.isnan(signal):
             signal = 0.0
+        self.signal_info = self.strategy.explain(candles)
         price = quote.mid
         target, note, atr_now = signal, "", math.nan
         if self.risk is not None:

@@ -1,4 +1,4 @@
-"""Quoi envoyer, et quand : alertes immédiates, alertes limitées en fréquence, résumé quotidien,
+﻿"""Quoi envoyer, et quand : alertes immédiates, alertes limitées en fréquence, résumé quotidien,
 commandes Telegram en lecture seule (/status, /aide).
 
 Couleurs : Telegram n'affiche pas de texte coloré ; on utilise des pastilles emoji, toujours
@@ -7,6 +7,7 @@ accompagnées d'un mot (« Achat », « Kill switch »…) pour ne jamais repose
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -68,10 +69,34 @@ def _gauge(ratio: float, width: int = 10) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 
+def signal_text(store: Store) -> str | None:
+    """« À quelle distance est-on d'un trade ? » — pour les stratégies qui s'expliquent (filtre de tendance)."""
+    info = (store.load_state() or {}).get("signal_info")
+    if not info or info.get("kind") != "trend":
+        return None
+    if not info.get("ready"):
+        return "🎯 Pas encore assez d'historique pour choisir la moyenne : en cash."
+    raw = store.get_meta("last_price")
+    price = json.loads(raw)["price"] if raw else info["close"]
+    level, window = info["level"], info["window"]
+    distance = price / level - 1
+    next_choice = pd.Timestamp(info["next_reselect"])
+    if info["invested"]:
+        action = (f"🎯 <b>Investi</b> : prix {_money(price)}, {_pct(distance)} au-dessus de la moyenne {window} j "
+                  f"({_money(level)}).\n→ Vente si une clôture journalière passe sous ≈ {_money(level)} "
+                  f"({_pct(-distance / (1 + distance))} d'ici).")
+    else:
+        action = (f"🎯 <b>En cash</b> : prix {_money(price)}, {_pct(distance)} sous la moyenne {window} j "
+                  f"({_money(level)}).\n→ Achat si une clôture journalière repasse au-dessus de ≈ {_money(level)} "
+                  f"({_pct(-distance / (1 + distance))} d'ici).")
+    return f"{action}\n🗓️ Prochain choix de la moyenne : à la clôture du {next_choice:%d/%m/%Y} (minuit UTC)."
+
+
 def status_text(store: Store, label: str, heading: str = "📊 <b>État du bot</b>") -> str | None:
     s = summarize(store)
     if s is None:
         return None
+    signal = signal_text(store)
     quote = s["identity"]["symbol"].split("/")[-1]
     edge = s["return"] - s["buy_hold_return"]
     guard = "🛑 kill switch ACTIF" if s["killed"] else "⏸️ pause journalière" if s["halted_day"] else "✅ actifs"
@@ -85,6 +110,7 @@ def status_text(store: Store, label: str, heading: str = "📊 <b>État du bot</
         f"📉 Pire chute : {_pct(s['max_drawdown'])}\n"
         f"🧾 {s['n_orders']} ordre(s), frais {_money(s['fees_paid'])} {escape(quote)}\n"
         f"🛡️ Garde-fous {guard} — {stop}"
+        + (f"\n\n{signal}" if signal else "")
     )
 
 

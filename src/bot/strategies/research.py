@@ -126,6 +126,31 @@ class AdaptiveTrend(Strategy):
             position[chosen == n] = signal[chosen == n]
         return position
 
+    def next_reselect(self, after: pd.Timestamp) -> pd.Timestamp:
+        day = int(after.value // 86_400_000_000_000) + 1
+        day += (self.phase_days - day) % self.reselect_days
+        return pd.Timestamp(day * 86_400, unit="s", tz="UTC")
+
+    def explain(self, df: pd.DataFrame) -> dict[str, Any] | None:
+        """Moyenne retenue, niveau qui ferait changer d'avis, prochaine date de re-choix."""
+        chosen = self.chosen_windows(df)
+        if chosen.isna().iloc[-1]:
+            return {"kind": "trend", "ready": False}
+        window = int(chosen.iloc[-1])
+        changed = chosen[chosen != chosen.shift()].index[-1]
+        level = float(sma(df["close"], window).iloc[-1])
+        close = float(df["close"].iloc[-1])
+        return {
+            "kind": "trend",
+            "ready": True,
+            "window": window,
+            "level": level,
+            "close": close,
+            "invested": close > level,
+            "chosen_since": changed.isoformat(),
+            "next_reselect": self.next_reselect(df.index[-1]).isoformat(),
+        }
+
 
 @dataclass(frozen=True)
 class FixedWeight(Strategy):

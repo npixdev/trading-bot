@@ -24,6 +24,10 @@ class Strategy(ABC):
     @abstractmethod
     def target_position(self, df: pd.DataFrame) -> pd.Series: ...
 
+    def explain(self, df: pd.DataFrame) -> dict[str, Any] | None:
+        """Explication lisible de la décision actuelle (seuil de déclenchement…), pour Telegram. Optionnel."""
+        return None
+
     @property
     def params(self) -> dict[str, Any]:
         return asdict(self)  # type: ignore[call-overload]
