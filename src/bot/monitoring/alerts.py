@@ -190,7 +190,8 @@ HELP = (
     "🤖 <b>Commandes disponibles</b>\n"
     "/status — état du bot + graphique\n"
     "/aide — cette aide\n\n"
-    "<i>Lecture seule : aucune commande ne peut faire trader le bot.</i>"
+    "<i>Le bot répond seulement quand il est en marche (réponse en moins de 30 s).\n"
+    "Lecture seule : aucune commande ne peut faire trader le bot.</i>"
 )
 
 
@@ -203,9 +204,9 @@ class TelegramCommands:
     META_KEY = "telegram_offset"
 
     def __init__(self, notifier: Notifier, store: Store, label: str, min_interval: float = 20.0,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic, max_age_seconds: float = 300.0) -> None:
         self.notifier, self.store, self.label = notifier, store, label
-        self.min_interval, self.clock = min_interval, clock
+        self.min_interval, self.clock, self.max_age_seconds = min_interval, clock, max_age_seconds
         self._last_poll: float | None = None
 
     def poll(self, now: pd.Timestamp | None = None) -> int:
@@ -216,6 +217,7 @@ class TelegramCommands:
         if self._last_poll is not None and t - self._last_poll < self.min_interval:
             return 0
         self._last_poll = t
+        now = now or pd.Timestamp.now(tz="UTC")
         offset = self.store.get_meta(self.META_KEY)
         updates = self.notifier.get_updates(int(offset) if offset is not None else None)
         handled = 0
@@ -224,6 +226,11 @@ class TelegramCommands:
             message = update.get("message") or {}
             if str((message.get("chat") or {}).get("id")) != str(self.notifier.chat_id):
                 log.warning("Commande Telegram ignorée : conversation non autorisée")
+                continue
+            sent = pd.Timestamp(int(message.get("date", 0)), unit="s", tz="UTC")
+            if (now - sent).total_seconds() > self.max_age_seconds:
+                # Envoyée pendant que le bot était arrêté : y répondre maintenant serait trompeur.
+                log.info("Commande Telegram périmée ignorée (envoyée le %s)", sent)
                 continue
             command = (message.get("text") or "").strip().split("@")[0].split(" ")[0].lower()
             if command in ("/status", "/etat", "/état"):

@@ -245,8 +245,17 @@ class FakeTelegram(TelegramNotifier):
         return True
 
 
-def _msg(update_id: int, text: str, chat: str = "42") -> dict:
-    return {"update_id": update_id, "message": {"chat": {"id": int(chat)}, "text": text}}
+def _msg(update_id: int, text: str, chat: str = "42", age_seconds: float = 5) -> dict:
+    date = int(pd.Timestamp.now(tz="UTC").timestamp() - age_seconds)
+    return {"update_id": update_id, "message": {"chat": {"id": int(chat)}, "text": text, "date": date}}
+
+
+def test_stale_commands_sent_while_bot_was_down_are_ignored(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    tg = FakeTelegram()
+    tg.inbox = [_msg(1, "/status", age_seconds=3 * 3600), _msg(2, "/status", age_seconds=10)]
+    assert TelegramCommands(tg, store, "PAPER", min_interval=0).poll() == 1  # seule la récente obtient une réponse
+    assert len(tg.photos) == 1
 
 
 def test_status_command_replies_with_chart(tmp_path: Path) -> None:
