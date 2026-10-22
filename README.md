@@ -1,9 +1,41 @@
-# Bot de trading crypto (spot, pédagogique)
+# Bot de trading crypto en Python
 
-Bot de trading crypto en Python, construit pas à pas pour **apprendre** : données, backtest honnête, stratégies, gestion du risque, paper trading, exécution sur testnet, monitoring.
+**Un bot de trading spot de bout en bout — données, backtest, recherche, exécution, monitoring — construit autour d'une seule question : _ce résultat est-il réel, ou est-ce que je me mens ?_**
 
-> **⚠ Avertissement — à lire avant tout.**
-> Les stratégies fournies (moyennes mobiles, Donchian, Bollinger/RSI) ont été testées hors échantillon sur BTC 2022-2026 : **aucune ne fait mieux que le hasard** une fois les frais comptés (voir [Résultats](#ce-que-disent-les-résultats)). Ce projet n'est **pas** une machine à gagner de l'argent. N'engage jamais de l'argent que tu ne peux pas perdre en totalité. Rien ici n'est un conseil financier.
+![Python 3.12](https://img.shields.io/badge/python-3.12-1B1B1B) ![tests](https://img.shields.io/badge/tests-217%20passed-2E7D32) ![spot only](https://img.shields.io/badge/spot-sans%20levier-C8102E) ![ccxt](https://img.shields.io/badge/exchanges-ccxt-8C7A6E)
+
+## En 30 secondes
+
+**1. Le backtest trop beau.** Une stratégie qui achète et vend *au hasard* affiche **+842 %** sur 2021-2026… tant qu'on oublie les frais. Avec 0,10 % par ordre : **−58 %**. Sur 200 tirages au hasard, **aucun** ne bat le simple « acheter et garder ».
+
+![200 stratégies au hasard contre le buy & hold](docs/img/hasard.jpg)
+
+**2. Un banc d'essai qui empêche de tricher.** Protocole de recherche [écrit et commité avant le moindre test](docs/RECHERCHE.md), walk-forward sur 8 ans de BTC (réglages choisis sur le passé, jugés sur l'avenir), frais et slippage partout, chaque stratégie confrontée à 200 tirages aléatoires.
+
+![Verdict : l'IA échoue, le filtre de tendance tient](docs/img/verdict.jpg)
+
+| Hors échantillon, BTC 2018 → 2026 | Rendement | Sharpe | Pire chute | Verdict |
+|---|---|---|---|---|
+| Acheter et garder | +1 229 % | 0,83 | −77 % | référence |
+| **Filtre de tendance** | +1 495 % | **1,00** | **−53 %** | prometteur (bat 97 % du hasard) |
+| IA (régression logistique) | −46 % | 0,06 | −62 % | échec (surapprentissage) |
+| Filtre de tendance sur 10 cryptos | — | 0,69 vs 0,68 | — | échec |
+
+Les échecs sont publiés avec les succès : c'est tout l'intérêt d'un protocole pré-enregistré.
+
+**3. Branché pour de vrai.** Prix en temps réel par WebSocket (≈ 6/s), **ordres exécutés sur le testnet Binance** (limit IOC, anti-doublon, réconciliation des soldes), stop-loss vérifié à chaque prix, kill switch, alertes et graphiques sur Telegram, déploiement Docker.
+
+## Ce que le projet montre techniquement
+
+- **Rigueur statistique** : détecteur automatique de look-ahead appliqué à chaque stratégie, walk-forward, témoin aléatoire calé sur l'exposition, tests multiples pris en compte, hypothèses déclarées avant les résultats.
+- **Machine learning sans magie** : régression logistique écrite en numpy (IRLS + régularisation L2), évaluée honnêtement — et rejetée.
+- **Systèmes temps réel** : asyncio + WebSocket (ccxt.pro) dans un fil dédié, reconnexion avec backoff, horloge robuste au décalage du PC, reprise exacte après crash (journal SQLite en WAL).
+- **Exécution sûre** : un seul module a le droit d'envoyer un ordre (vérifié par un test), ordres IOC plafonnés, `clientOrderId` contre les doublons après coupure réseau, portefeuille propre au bot, mode réel verrouillé (flag `--live` + phrase tapée + clé sans droit de retrait).
+- **Qualité** : 217 tests pytest sans réseau, type hints partout, config YAML validée (le levier est refusé par le code).
+
+**Stack** : Python 3.12 · pandas · numpy · ccxt / ccxt.pro · asyncio · SQLite · matplotlib · Telegram Bot API · Docker · pytest
+
+> **⚠ Avertissement.** Projet d'apprentissage et de recherche, **pas** une machine à gagner de l'argent : « prometteur » ne veut pas dire « gagnant », et les stratégies classiques (moyennes mobiles, Donchian, Bollinger/RSI) ne font pas mieux que le hasard une fois les frais comptés (voir [Résultats](#ce-que-disent-les-résultats)). Rien ici n'est un conseil financier.
 
 **Garanties de conception**
 - **Spot uniquement** : pas de futures, pas de levier, pas de marge (`max_exposure > 1` est refusé par le code).
@@ -34,7 +66,7 @@ Bot de trading crypto en Python, construit pas à pas pour **apprendre** : donn�
 Prérequis : **Python 3.12** (3.11 minimum ; les versions trop récentes comme 3.15 n'ont pas encore toutes les bibliothèques précompilées) et git.
 
 ```powershell
-git clone <url-du-repo> trading-bot
+git clone https://github.com/npixdev/trading-bot.git
 cd trading-bot
 py -3.12 -m venv .venv                       # Linux/macOS : python3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"   # Linux/macOS : .venv/bin/pip install -e ".[dev]"
