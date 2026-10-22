@@ -33,7 +33,7 @@ from bot.execution.live_guard import confirm_live
 from bot.monitoring import (
     Alerts,
     DailySummary,
-    TelegramCommands,
+    TelegramListener,
     TelegramNotifier,
     check_health,
     notifier_from_env,
@@ -274,15 +274,13 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
     print(f"Journal : {db.resolve()}  |  alertes Telegram : {'actives' if alerts_on else 'non configurées'}")
     print("Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
     daily = DailySummary(store, notifier, label)
-    commands = TelegramCommands(notifier, store, label)
-
-    def on_step(now: pd.Timestamp) -> None:
-        daily.maybe_send(now)
-        commands.poll(now)
-
+    store.commit()  # le fil d'écoute ouvre sa propre connexion : le schéma doit être écrit
+    listener = TelegramListener(notifier, db, label)
+    listener.start()
     try:
-        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration, on_step=on_step)
+        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration, on_step=daily.maybe_send)
     finally:
+        listener.stop()  # fil « daemon » : il s'arrête avec le programme, même au milieu d'une attente
         store.close()
 
 

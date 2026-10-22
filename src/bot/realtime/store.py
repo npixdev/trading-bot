@@ -47,7 +47,10 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.listener = listener
-        self.conn = sqlite3.connect(path)
+        # timeout : attend qu'un autre fil (écoute Telegram) libère le verrou au lieu d'échouer.
+        self.conn = sqlite3.connect(path, timeout=30)
+        # WAL : lectures possibles pendant qu'un autre fil écrit (trading + commandes Telegram en parallèle).
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         self._migrate()
         self.conn.commit()

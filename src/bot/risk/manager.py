@@ -97,7 +97,7 @@ class RiskManager:
             return None
         price = stop_hit_price(self.stop, bar_open, bar_low)
         if price is not None:
-            gap = " (gap : ouverture sous le stop)" if price < self.stop else ""
+            gap = " (gap : le prix a sauté par-dessus le stop, sortie plus bas que prévu)" if price < self.stop else ""
             self.events.append(RiskEvent(time, "stop", f"stop {self.stop:,.2f} touché, sortie à {price:,.2f}{gap}"))
             self.stop = None
             self.wait_for_flat_signal = True

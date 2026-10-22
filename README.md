@@ -127,14 +127,16 @@ Le bot envoie :
 
 Messages mis en forme : 🟢 achat, 🔴 vente, 🛑 kill switch, ⚠️ anomalie, ✅ démarrage — toujours accompagnés d'un mot, jamais la couleur seule.
 
-**Commandes à taper dans la conversation Telegram** (lues toutes les ~20 s pendant que le bot tourne) :
+**Commandes à taper dans la conversation Telegram** (réponse en 1 à 3 s pendant que le bot tourne — un fil dédié écoute Telegram en continu, indépendamment de la boucle de trading) :
 
 | Commande | Réponse |
 |---|---|
 | `/status` | état du bot + graphique, tout de suite |
 | `/aide` | liste des commandes |
 
-Elles sont **en lecture seule** (aucune ne peut faire trader le bot) et ne sont acceptées **que depuis ta conversation** (`TELEGRAM_CHAT_ID`) : si quelqu'un d'autre trouve ton bot, il est ignoré.
+Elles sont **en lecture seule** (aucune ne peut faire trader le bot) et ne sont acceptées **que depuis ta conversation** (`TELEGRAM_CHAT_ID`) : si quelqu'un d'autre trouve ton bot, il est ignoré. Fautes de frappe tolérées (`/stats`, `statut`…) ; une commande inconnue reçoit l'aide. Les commandes envoyées pendant que le bot était arrêté (plus de 5 min) sont ignorées.
+
+⚠ **Un seul bot à la fois par token Telegram** pour les commandes : si deux bots (ex. `paper` et `testnet` dans Docker) partagent le même token, Telegram refuse l'écoute simultanée. Crée un bot Telegram par instance, ou n'en fais tourner qu'une.
 
 Une alerte qui échoue (Telegram injoignable) est journalisée et **n'interrompt jamais le trading**. Sans configuration, le bot tourne normalement, sans alertes.
 

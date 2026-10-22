@@ -30,6 +30,7 @@ def escape(text: object) -> str:
 class Notifier(Protocol):
     def send(self, text: str) -> bool: ...
     def send_photo(self, png: bytes, caption: str = "") -> bool: ...
+    def send_chat_action(self, action: str = "upload_photo") -> bool: ...
 
 
 class NullNotifier:
@@ -40,6 +41,9 @@ class NullNotifier:
         return False
 
     def send_photo(self, png: bytes, caption: str = "") -> bool:
+        return False
+
+    def send_chat_action(self, action: str = "upload_photo") -> bool:
         return False
 
 
@@ -86,13 +90,21 @@ class TelegramNotifier:
             files={"photo": ("graphique.png", png, "image/png")},
         )
 
-    def get_updates(self, offset: int | None = None) -> list[dict[str, Any]]:
-        """Messages reçus par le bot (lecture immédiate, sans attente)."""
-        params: dict[str, Any] = {"timeout": 0, "allowed_updates": '["message"]'}
+    def send_chat_action(self, action: str = "upload_photo") -> bool:
+        """Affiche « envoie une photo… » dans la conversation : retour immédiat pendant le dessin du graphique."""
+        return self._call("sendChatAction", json={"chat_id": self.chat_id, "action": action})
+
+    def get_updates(self, offset: int | None = None, wait: int = 0) -> list[dict[str, Any]]:
+        """Messages reçus par le bot.
+
+        `wait` > 0 = attente longue (*long polling*) : Telegram garde la connexion ouverte jusqu'à
+        `wait` secondes et répond dès qu'un message arrive → réaction quasi immédiate, sans marteler l'API.
+        """
+        params: dict[str, Any] = {"timeout": wait, "allowed_updates": '["message"]'}
         if offset is not None:
             params["offset"] = offset
         try:
-            response = self.get(self._url("getUpdates"), params=params, timeout=self.timeout)
+            response = self.get(self._url("getUpdates"), params=params, timeout=self.timeout + wait)
             return response.json().get("result", []) if response.status_code == 200 else []
         except (requests.RequestException, ValueError) as exc:
             log.warning("Lecture des commandes Telegram impossible (%s)", type(exc).__name__)

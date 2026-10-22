@@ -1,29 +1,30 @@
 """Graphique PNG envoyé sur Telegram : valeur du bot vs buy & hold, ordres, périodes investies, drawdown.
 
 Palette : celle du rapport HTML (validée daltonisme) ; fond clair, lisible aussi dans le thème sombre
-de Telegram. Rendu sans écran (backend Agg) : fonctionne sur un serveur ou dans Docker.
+de Telegram. Rendu sans écran (Agg) via l'API objet de matplotlib (Figure), sans pyplot : chaque appel
+a sa propre figure, ce qui permet de dessiner depuis le fil d'écoute Telegram et la boucle de trading
+en même temps.
 """
 
 from __future__ import annotations
 
 import io
 
-import matplotlib
+import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
+import pandas as pd
+from matplotlib.axes import Axes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 
-matplotlib.use("Agg")
-
-import matplotlib.dates as mdates  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
-
-from bot.realtime.store import Store  # noqa: E402
+from bot.realtime.store import Store
 
 SURFACE, INK, INK_2, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9"
 BOT, BENCH, BUY, SELL = "#2a78d6", "#898781", "#1baf7a", "#eb6834"
 WASH = (42 / 255, 120 / 255, 214 / 255, 0.10)
 
 
-def _style(ax: plt.Axes) -> None:
+def _style(ax: Axes) -> None:
     ax.set_facecolor(SURFACE)
     ax.grid(axis="y", color=GRID, linewidth=0.8)
     ax.grid(axis="x", visible=False)
@@ -33,7 +34,7 @@ def _style(ax: plt.Axes) -> None:
     ax.tick_params(colors=MUTED, labelsize=9, length=0)
 
 
-def _shade_positions(ax: plt.Axes, times: pd.Series, invested: pd.Series) -> None:
+def _shade_positions(ax: Axes, times: pd.Series, invested: pd.Series) -> None:
     start = None
     for t, on in zip(times, invested):
         if on and start is None:
@@ -59,9 +60,9 @@ def equity_chart(store: Store, title: str) -> bytes | None:
     invested = (eq["units"].astype(float) * eq["price"].astype(float) / value) > 0.001
     drawdown = value / value.cummax() - 1
 
-    fig, (ax, ax_dd) = plt.subplots(
-        2, 1, figsize=(8, 5.2), dpi=150, sharex=True, gridspec_kw={"height_ratios": [3, 1.1], "hspace": 0.12}
-    )
+    fig = Figure(figsize=(8, 5.2), dpi=150)
+    FigureCanvasAgg(fig)
+    ax, ax_dd = fig.subplots(2, 1, sharex=True, gridspec_kw={"height_ratios": [3, 1.1], "hspace": 0.12})
     fig.patch.set_facecolor(SURFACE)
     for a in (ax, ax_dd):
         _style(a)
@@ -85,7 +86,7 @@ def equity_chart(store: Store, title: str) -> bytes | None:
     # Légende au-dessus du tracé : elle ne masque jamais une courbe.
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), frameon=False, fontsize=9, ncol=4, labelcolor=INK_2,
               borderaxespad=0.2, handletextpad=0.4, columnspacing=1.4)
-    ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:,.0f}".replace(",", " ")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:,.0f}".replace(",", " ")
                                                                  if abs(v) >= 1000 else f"{v:,.2f}"))
     last = value.iloc[-1]
     ax.annotate(f"{last:,.2f}".replace(",", " "), (times.iloc[-1], last), xytext=(6, 0),
@@ -104,5 +105,4 @@ def equity_chart(store: Store, title: str) -> bytes | None:
 
     buffer = io.BytesIO()
     fig.savefig(buffer, format="png", facecolor=SURFACE, bbox_inches="tight")
-    plt.close(fig)
     return buffer.getvalue()

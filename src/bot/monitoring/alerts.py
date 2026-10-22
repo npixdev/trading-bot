@@ -8,8 +8,10 @@ accompagnées d'un mot (« Achat », « Kill switch »…) pour ne jamais repose
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -212,17 +214,22 @@ class TelegramCommands:
         self.min_interval, self.clock, self.max_age_seconds = min_interval, clock, max_age_seconds
         self._last_poll: float | None = None
 
-    def poll(self, now: pd.Timestamp | None = None) -> int:
-        """Traite les commandes en attente. Renvoie le nombre de commandes exécutées."""
+    def poll(self, now: pd.Timestamp | None = None, wait: int = 0) -> int:
+        """Lit et traite les commandes en attente. Renvoie le nombre de commandes exécutées.
+
+        `wait` > 0 : attente longue côté Telegram (utilisé par le fil d'écoute TelegramListener).
+        """
         if not isinstance(self.notifier, TelegramNotifier):
             return 0
         t = self.clock()
         if self._last_poll is not None and t - self._last_poll < self.min_interval:
             return 0
         self._last_poll = t
-        now = now or pd.Timestamp.now(tz="UTC")
         offset = self.store.get_meta(self.META_KEY)
-        updates = self.notifier.get_updates(int(offset) if offset is not None else None)
+        updates = self.notifier.get_updates(int(offset) if offset is not None else None, wait=wait)
+        return self.handle(updates, now or pd.Timestamp.now(tz="UTC"))
+
+    def handle(self, updates: list[dict[str, Any]], now: pd.Timestamp) -> int:
         handled = 0
         for update in updates:
             self.store.set_meta(self.META_KEY, str(int(update["update_id"]) + 1))  # ne jamais retraiter
@@ -238,6 +245,7 @@ class TelegramCommands:
             text = (message.get("text") or "").strip()
             command = text.split("@")[0].split(" ")[0].lower().lstrip("/")
             if command in STATUS_ALIASES:
+                self.notifier.send_chat_action("upload_photo")  # « envoie une photo… » s'affiche tout de suite
                 send_status(self.store, self.notifier, self.label)
             elif command in HELP_ALIASES:
                 self.notifier.send(HELP)
@@ -246,3 +254,36 @@ class TelegramCommands:
             handled += 1
         self.store.commit()
         return handled
+
+
+class TelegramListener(threading.Thread):
+    """Écoute Telegram en continu, à côté de la boucle de trading : réponse en 1 à 3 s au lieu
+    d'attendre le prochain tour de boucle (jusqu'à 60 s).
+
+    Fil séparé avec **sa propre connexion** au journal (SQLite interdit de partager une connexion
+    entre fils). En lecture seule pour le trading : il ne touche qu'à l'offset des commandes.
+    Une erreur (réseau, bug) est journalisée puis l'écoute reprend ; elle ne peut pas arrêter le trading.
+    """
+
+    def __init__(self, notifier: Notifier, db_path: Path, label: str, wait: int = 25) -> None:
+        super().__init__(name="telegram-listener", daemon=True)  # daemon : ne bloque pas l'arrêt du bot
+        self.notifier, self.db_path, self.label, self.wait = notifier, db_path, label, wait
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self) -> None:
+        if not isinstance(self.notifier, TelegramNotifier):
+            return
+        store = Store(self.db_path)
+        commands = TelegramCommands(self.notifier, store, self.label, min_interval=0)
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    commands.poll(wait=self.wait)
+                except Exception:  # noqa: BLE001 — l'écoute ne doit jamais mourir
+                    log.exception("Erreur dans l'écoute des commandes Telegram (reprise dans 5 s)")
+                    self._stop_event.wait(5)
+        finally:
+            store.close()

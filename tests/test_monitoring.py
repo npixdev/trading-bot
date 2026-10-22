@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -11,6 +13,7 @@ from bot.monitoring import (
     DailySummary,
     NullNotifier,
     TelegramCommands,
+    TelegramListener,
     TelegramNotifier,
     check_health,
     notifier_from_env,
@@ -35,6 +38,9 @@ class Outbox:
 
     def send_photo(self, png: bytes, caption: str = "") -> bool:
         self.photos.append((png, caption))
+        return True
+
+    def send_chat_action(self, action: str = "upload_photo") -> bool:
         return True
 
 
@@ -232,9 +238,17 @@ class FakeTelegram(TelegramNotifier):
         self.inbox: list[dict] = []
         self.texts: list[str] = []
         self.photos: list[str] = []
+        self.actions: list[str] = []
 
-    def get_updates(self, offset=None):
-        return [u for u in self.inbox if offset is None or u["update_id"] >= offset]
+    def send_chat_action(self, action: str = "upload_photo") -> bool:
+        self.actions.append(action)
+        return True
+
+    def get_updates(self, offset=None, wait=0):
+        found = [u for u in self.inbox if offset is None or u["update_id"] >= offset]
+        if not found and wait:
+            time.sleep(0.05)  # simule l'attente longue de Telegram (sans bloquer le test 25 s)
+        return found
 
     def send(self, text: str) -> bool:
         self.texts.append(text)
@@ -286,6 +300,47 @@ def test_unknown_command_gets_an_answer(tmp_path: Path) -> None:
     TelegramCommands(tg, store, "PAPER", min_interval=0).poll()
     assert "Je n'ai pas compris" in tg.texts[0] and "&lt;tout&gt;" in tg.texts[0]
     assert "Commandes disponibles" in tg.texts[0] and tg.photos == []  # rien d'autre ne se passe
+
+
+def test_listener_answers_within_seconds_while_trading_runs(tmp_path: Path) -> None:
+    """Le fil d'écoute répond sans attendre la boucle de trading, avec sa propre connexion SQLite."""
+    store, _, _ = _run_days(tmp_path)
+    store.commit()
+    tg = FakeTelegram()
+    listener = TelegramListener(tg, store.path, "PAPER", wait=1)
+    listener.start()
+    try:
+        tg.inbox.append(_msg(1, "/status"))
+        start = time.monotonic()
+        # Pendant ce temps, la « boucle de trading » continue d'écrire dans le journal.
+        while not tg.photos and time.monotonic() - start < 10:
+            store.log_event(pd.Timestamp.now(tz="UTC"), "start", "écriture concurrente")
+            store.commit()
+            time.sleep(0.05)
+        elapsed = time.monotonic() - start
+    finally:
+        listener.stop()
+        listener.join(timeout=5)
+    assert len(tg.photos) == 1 and elapsed < 5
+    assert "typing" not in tg.actions and tg.actions == ["upload_photo"]
+
+
+def test_charts_can_be_drawn_from_two_threads_at_once(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    store.commit()
+    results: list[bytes | None] = []
+
+    def draw() -> None:
+        own = Store(store.path)  # une connexion par fil, comme le TelegramListener
+        results.append(equity_chart(own, "x"))
+        own.close()
+
+    threads = [threading.Thread(target=draw) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(results) == 3 and all(r is not None and r.startswith(b"\x89PNG") for r in results)
 
 
 def test_commands_from_other_chats_are_ignored(tmp_path: Path) -> None:
