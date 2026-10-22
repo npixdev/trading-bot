@@ -84,6 +84,12 @@ python -m bot compare                            # 3 stratégies × 1h/4h/1d, ra
 Stratégies : `buy_hold`, `random` (témoin), `sma`, `donchian`, `bollinger`, `alternate` (test d'exécution uniquement).
 Toujours comparées au buy & hold ; `compare` les confronte aussi à 100 stratégies aléatoires de même exposition.
 
+### Temps réel : comment le bot suit le marché
+
+- **Flux WebSocket** : l'exchange pousse chaque nouveau prix (≈ 6 par seconde sur OKX) ; le stop-loss est vérifié à chaque prix, sans requête supplémentaire. Si le flux coupe, il se reconnecte seul et une vérification complète par requêtes a lieu toutes les `poll_seconds` (filet de sécurité). `--no-stream` pour le désactiver.
+- **Décision à la clôture** : le bot se réveille quelques secondes après chaque clôture de bougie (≈ 10 s chez OKX, qui publie ses bougies avec un léger retard).
+- **Pas de veille** : sous Windows, la mise en veille automatique du PC est bloquée tant que le bot tourne (`--allow-sleep` pour l'autoriser). Fermer le capot ou appuyer sur le bouton d'alimentation endort quand même le PC — pour du 24/7, un VPS reste la solution.
+
 ### 3. Paper trading (prix réels, portefeuille fictif, aucun compte nécessaire)
 
 ```powershell

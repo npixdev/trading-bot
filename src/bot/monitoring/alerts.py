@@ -41,6 +41,7 @@ IMMEDIATE = {
 # Peuvent se répéter en rafale (panne de l'exchange…) : au plus une alerte par type et par fenêtre.
 THROTTLED = {
     "network_error": "📡 <b>Erreur réseau</b>",
+    "stream_error": "🔌 <b>Flux de prix temps réel coupé</b>",
     "clock_resync": "🕐 <b>Horloge resynchronisée</b>",
     "partial_fill": "◐ <b>Exécution partielle</b>",
     "order_unfilled": "○ <b>Ordre non exécuté</b>",
@@ -215,7 +216,8 @@ class TelegramCommands:
         self._last_poll: float | None = None
 
     def poll(self, now: pd.Timestamp | None = None, wait: int = 0) -> int:
-        """Lit et traite les commandes en attente. Renvoie le nombre de commandes exécutées.
+        """Lit et traite les commandes en attente. Renvoie le nombre de commandes exécutées,
+        ou -1 si Telegram est injoignable.
 
         `wait` > 0 : attente longue côté Telegram (utilisé par le fil d'écoute TelegramListener).
         """
@@ -227,6 +229,8 @@ class TelegramCommands:
         self._last_poll = t
         offset = self.store.get_meta(self.META_KEY)
         updates = self.notifier.get_updates(int(offset) if offset is not None else None, wait=wait)
+        if updates is None:
+            return -1
         return self.handle(updates, now or pd.Timestamp.now(tz="UTC"))
 
     def handle(self, updates: list[dict[str, Any]], now: pd.Timestamp) -> int:
@@ -265,9 +269,11 @@ class TelegramListener(threading.Thread):
     Une erreur (réseau, bug) est journalisée puis l'écoute reprend ; elle ne peut pas arrêter le trading.
     """
 
-    def __init__(self, notifier: Notifier, db_path: Path, label: str, wait: int = 25) -> None:
+    def __init__(self, notifier: Notifier, db_path: Path, label: str, wait: int = 25,
+                 max_backoff: float = 60.0) -> None:
         super().__init__(name="telegram-listener", daemon=True)  # daemon : ne bloque pas l'arrêt du bot
         self.notifier, self.db_path, self.label, self.wait = notifier, db_path, label, wait
+        self.max_backoff = max_backoff
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -278,12 +284,24 @@ class TelegramListener(threading.Thread):
             return
         store = Store(self.db_path)
         commands = TelegramCommands(self.notifier, store, self.label, min_interval=0)
+        backoff = 0.0
         try:
             while not self._stop_event.is_set():
                 try:
-                    commands.poll(wait=self.wait)
+                    result = commands.poll(wait=self.wait)
                 except Exception:  # noqa: BLE001 — l'écoute ne doit jamais mourir
-                    log.exception("Erreur dans l'écoute des commandes Telegram (reprise dans 5 s)")
-                    self._stop_event.wait(5)
+                    log.exception("Erreur dans l'écoute des commandes Telegram")
+                    result = -1
+                if result >= 0:
+                    if backoff:
+                        log.info("Écoute Telegram rétablie")
+                    backoff = 0.0
+                    continue
+                # Telegram injoignable (réveil de veille, coupure Internet…) : on attend de plus en plus
+                # longtemps au lieu de réessayer en boucle (vécu : 300 essais en 0,5 s au réveil du PC).
+                backoff = min(max(2.0, backoff * 2), self.max_backoff)
+                if backoff == 2.0:
+                    log.warning("Telegram injoignable : nouvel essai dans %.0f s (puis de plus en plus espacé)", backoff)
+                self._stop_event.wait(backoff)
         finally:
             store.close()

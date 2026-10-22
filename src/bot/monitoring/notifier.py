@@ -94,8 +94,8 @@ class TelegramNotifier:
         """Affiche « envoie une photo… » dans la conversation : retour immédiat pendant le dessin du graphique."""
         return self._call("sendChatAction", json={"chat_id": self.chat_id, "action": action})
 
-    def get_updates(self, offset: int | None = None, wait: int = 0) -> list[dict[str, Any]]:
-        """Messages reçus par le bot.
+    def get_updates(self, offset: int | None = None, wait: int = 0) -> list[dict[str, Any]] | None:
+        """Messages reçus par le bot, ou None si Telegram est injoignable (≠ liste vide : « rien de neuf »).
 
         `wait` > 0 = attente longue (*long polling*) : Telegram garde la connexion ouverte jusqu'à
         `wait` secondes et répond dès qu'un message arrive → réaction quasi immédiate, sans marteler l'API.
@@ -105,15 +105,18 @@ class TelegramNotifier:
             params["offset"] = offset
         try:
             response = self.get(self._url("getUpdates"), params=params, timeout=self.timeout + wait)
-            return response.json().get("result", []) if response.status_code == 200 else []
+            if response.status_code != 200:
+                log.warning("Telegram a refusé getUpdates (HTTP %s)", response.status_code)
+                return None
+            return response.json().get("result", [])
         except (requests.RequestException, ValueError) as exc:
-            log.warning("Lecture des commandes Telegram impossible (%s)", type(exc).__name__)
-            return []
+            log.debug("Lecture des commandes Telegram impossible (%s)", type(exc).__name__)
+            return None
 
     def find_chat_ids(self) -> list[tuple[str, str]]:
         """(chat_id, nom) des conversations qui ont écrit au bot : aide à configurer TELEGRAM_CHAT_ID."""
         found: dict[str, str] = {}
-        for update in self.get_updates():
+        for update in self.get_updates() or []:
             chat = (update.get("message") or update.get("channel_post") or {}).get("chat") or {}
             if "id" in chat:
                 name = chat.get("username") or chat.get("title") or chat.get("first_name")

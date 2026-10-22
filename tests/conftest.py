@@ -41,8 +41,8 @@ class FakeExchange:
         start = T0 + -(-(start - T0) // HOUR_MS) * HOUR_MS  # arrondi à la bougie suivante
         rows: list[list[Any]] = []
         ts = start
-        # Comme un vrai exchange, renvoie aussi la bougie en cours (ouverte avant now).
-        while ts < self.now and len(rows) < min(limit or 1000, self.page_size):
+        # Comme un vrai exchange, renvoie aussi la bougie en cours (ouverte au plus tard à now).
+        while ts <= self.now and len(rows) < min(limit or 1000, self.page_size):
             i = (ts - T0) // HOUR_MS
             if i not in self.missing:
                 price = 100.0 + i

@@ -40,6 +40,8 @@ from bot.monitoring import (
     send_status,
 )
 from bot.realtime import MarketFeed, Store, Trader, run_loop
+from bot.realtime.power import prevent_sleep
+from bot.realtime.stream import PriceStream
 from bot.realtime.status import render, summarize
 from bot.realtime.trader import ConfigMismatch, make_identity
 from bot.report import run_comparison, verdict, write_report
@@ -277,10 +279,26 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
     store.commit()  # le fil d'écoute ouvre sa propre connexion : le schéma doit être écrit
     listener = TelegramListener(notifier, db, label)
     listener.start()
+    stream = None
+    if not args.no_stream:
+        stream = PriceStream(exchange, symbol, sandbox=feed.sandbox)
+        feed.stream = stream
+        stream.start()
+    print(f"Prix temps réel (WebSocket) : {'actif — stop vérifié à chaque prix' if stream else 'désactivé'} ; "
+          f"décision quelques secondes après chaque clôture de bougie {timeframe}")
+    allow_sleep = prevent_sleep() if not args.allow_sleep else (lambda: None)
+    if not args.allow_sleep:
+        print("Mise en veille automatique du PC bloquée pendant que le bot tourne (--allow-sleep pour l'autoriser)")
     try:
-        run_loop(trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration, on_step=daily.maybe_send)
+        run_loop(
+            trader, feed, store, args.poll or pc.poll_seconds, duration=args.duration,
+            on_step=daily.maybe_send, stream=stream, timeframe=timeframe,
+        )
     finally:
-        listener.stop()  # fil « daemon » : il s'arrête avec le programme, même au milieu d'une attente
+        listener.stop()  # fils « daemon » : ils s'arrêtent avec le programme, même au milieu d'une attente
+        if stream is not None:
+            stream.stop()
+        allow_sleep()
         store.close()
 
 
@@ -515,6 +533,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--db", type=Path, default=None)
         p.add_argument("--no-risk", action="store_true", help="désactive les garde-fous (déconseillé, interdit en live)")
         p.add_argument("--reset", action="store_true", help="efface le journal existant (confirmation demandée)")
+        p.add_argument("--no-stream", action="store_true", help="sans flux WebSocket (stop vérifié à chaque --poll)")
+        p.add_argument("--allow-sleep", action="store_true", help="laisse le PC se mettre en veille (bot figé pendant)")
 
     paper = sub.add_parser("paper", help="Paper trading temps réel (portefeuille fictif, aucun ordre réel)")
     add_realtime_args(paper)

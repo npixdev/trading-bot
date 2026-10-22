@@ -34,6 +34,41 @@ def test_unclosed_candle_is_excluded() -> None:
     assert rows[-1][0] + HOUR_MS <= ex.now
 
 
+class SkewedExchange(FakeExchange):
+    """L'horloge du PC avance de `skew_ms` : à « minuit » local, l'exchange n'a pas encore clôturé la bougie."""
+
+    def __init__(self, n_candles: int, skew_ms: int) -> None:
+        super().__init__(n_candles)
+        self.server_now = self.now - skew_ms  # l'exchange vit légèrement dans le passé
+        self.now = self.now + 2_000  # le PC se réveille 2 s après « sa » clôture
+
+    def fetch_ohlcv(self, symbol, timeframe, since=None, limit=None):
+        rows = super().fetch_ohlcv(symbol, timeframe, since, limit)
+        return [r for r in rows if r[0] <= self.server_now]  # l'exchange n'a pas encore ouvert la suivante
+
+
+def test_clock_ahead_of_exchange_does_not_leak_unclosed_candle() -> None:
+    """PC en avance de 3,4 s (mesuré) : la bougie que le PC croit close est encore ouverte côté exchange."""
+    ex = SkewedExchange(n_candles=50, skew_ms=3_400)
+    rows = _all_rows(ex, since_ms=T0, sleep=lambda s: None)
+    assert len(rows) == 49  # la 50e (ouverte côté exchange) est écartée
+    assert rows[-1][0] == T0 + 48 * HOUR_MS
+
+
+def test_candle_is_closed_as_soon_as_exchange_opens_the_next() -> None:
+    ex = FakeExchange(n_candles=50)  # now = clôture exacte de la 50e ; l'exchange a ouvert la 51e
+    rows = _all_rows(ex, since_ms=T0, sleep=lambda s: None)
+    assert len(rows) == 50  # pas besoin d'attendre la marge de sécurité
+
+
+def test_last_closed_candle_on_a_page_boundary_is_not_lost() -> None:
+    """200 bougies, pages de 100 : la 200e termine la page 2, la preuve de sa clôture est en page 3."""
+    ex = FakeExchange(n_candles=200, page_size=100)
+    rows = _all_rows(ex, since_ms=T0, sleep=lambda s: None)
+    timestamps = [r[0] for r in rows]
+    assert len(rows) == 200 and timestamps == sorted(set(timestamps))
+
+
 def test_until_is_exclusive() -> None:
     ex = FakeExchange(n_candles=250)
     rows = _all_rows(ex, since_ms=T0, until_ms=T0 + 120 * HOUR_MS, sleep=lambda s: None)

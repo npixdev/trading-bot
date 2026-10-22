@@ -12,6 +12,9 @@ import ccxt
 log = logging.getLogger(__name__)
 T = TypeVar("T")
 
+# Avance maximale tolérée de l'horloge du PC sur celle de l'exchange (mesuré : 3,4 s chez l'utilisateur).
+CLOCK_MARGIN_MS = 10_000
+
 
 class OHLCVSource(Protocol):
     """Le sous-ensemble de l'API ccxt dont on a besoin (facilite les tests)."""
@@ -84,6 +87,10 @@ def fetch_ohlcv_pages(
 
     Chaque page est une liste de lignes ccxt [ts_ms, open, high, low, close, volume].
     La bougie en cours (pas encore clôturée) est toujours exclue.
+
+    « Clôturée » ne se fie pas seulement à l'horloge du PC, qui peut avancer de quelques secondes
+    sur celle de l'exchange : une bougie est close si l'exchange a déjà ouvert la suivante, ou si sa
+    fin est passée depuis plus de `CLOCK_MARGIN_MS` à l'horloge locale.
     """
     tf = timeframe_ms(timeframe)
     now = source.milliseconds()
@@ -94,11 +101,21 @@ def fetch_ohlcv_pages(
         rows = _fetch_with_retry(source, symbol, timeframe, cursor, limit, max_retries, sleep)
         if not rows:
             break
-        # Garde seulement les bougies clôturées (ouverture + durée <= now) et dans la plage.
-        page = [r for r in rows if cursor <= r[0] < end and r[0] + tf <= now]
-        last_ts = int(rows[-1][0])
+        newest = int(rows[-1][0])
+        page = [
+            r for r in rows
+            if cursor <= r[0] < end and (r[0] < newest or r[0] + tf <= now - CLOCK_MARGIN_MS)
+        ]
         if page:
             yield page
-        if last_ts < cursor:  # l'exchange n'avance plus : on arrête pour éviter une boucle infinie
+        if newest < cursor:  # l'exchange n'avance plus : on arrête pour éviter une boucle infinie
             break
-        cursor = last_ts + tf
+        # La dernière bougie de la page est ambiguë si rien ne prouve encore sa clôture : on la
+        # redemande en tête de la page suivante, qui contiendra peut-être la bougie d'après.
+        ambiguous = newest + tf > now - CLOCK_MARGIN_MS
+        if ambiguous:
+            if len(rows) == 1 or newest == cursor:
+                break  # c'est la bougie en cours : rien de plus à récupérer
+            cursor = newest
+        else:
+            cursor = newest + tf

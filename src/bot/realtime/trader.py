@@ -218,6 +218,21 @@ class Trader:
         if self.risk is not None and was_flat and self.broker.units > 0 and result.orders and self.risk.stop is None:
             self.risk.on_entry(float(result.orders[-1]["price"]), math.nan)
 
+    def on_tick(self, quote: Quote) -> bool:
+        """Nouveau prix poussé par le flux WebSocket : vérifie seulement le stop (aucune requête).
+
+        Appelé des centaines de fois par minute : ne fait rien tant qu'il n'y a pas de stop à surveiller.
+        Renvoie True si le stop a été déclenché.
+        """
+        if self.risk is None or self.risk.stop is None or self.broker.units <= 0:
+            return False
+        if quote.bid > self.risk.stop:
+            return False
+        now = self.feed.now()
+        self._check_stop(now, quote)
+        self._flush()
+        return True
+
     def _check_stop(self, now: pd.Timestamp, quote: Quote) -> None:
         if self.risk is None or self.broker.units <= 0:
             return
