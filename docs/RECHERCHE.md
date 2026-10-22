@@ -81,4 +81,53 @@ Faites **après** avoir vu les résultats : elles ne comptent pas comme preuve, 
 4. **L'IA a échoué**, comme attendu : plus de variables et plus de trades, c'est plus de bruit et plus de frais.
 5. **Résultat différent de l'étape 3** (croisement de moyennes, 2022-2026, « indiscernable du hasard ») : autre règle (prix vs moyenne), et surtout une période 2018-2026 qui contient deux krachs au lieu d'un.
 
-**Statut** : H1 et H3 sont *prometteuses*, pas *gagnantes*. Étape suivante prévue par le protocole : paper trading. Avec ≈ 3 à 10 trades par an en journalier, des semaines de paper trading vérifieront la mécanique, pas la performance — celle-ci ne se jugera que sur des années.
+---
+
+# Recherche 2 — le filtre de tendance sur plusieurs cryptos (H5) — protocole pré-enregistré
+
+> **Écrit et commité le 2026-10-22, AVANT d'avoir téléchargé les données des autres cryptos.**
+
+## Motivation
+
+H1 ne fait que 3 à 10 trades par an sur le seul BTC. Appliquer la même règle, indépendamment, à plusieurs cryptos donnerait plus d'activité **sans trader plus souvent chaque crypto**, et une diversification. Rien ne garantit que la règle marche ailleurs que sur le BTC : d'où ce test.
+
+## Univers (fixé à l'avance, contre le biais du survivant)
+
+Les **10 plus grosses cryptos par capitalisation vers août 2018** (début de la période de test), hors stablecoins, telles qu'on pouvait les connaître à l'époque — **pas** les gagnantes connues aujourd'hui :
+
+**BTC, ETH, XRP, BCH, EOS, XLM, LTC, ADA, IOTA, TRX**, en paires `/USDT` sur Binance, bougies journalières.
+
+Règles de données, fixées à l'avance :
+- une crypto n'est tradée qu'à partir du moment où son historique Binance suffit à la stratégie (365 + 200 jours) ; avant, sa part reste en cash, **pour la stratégie comme pour les références** ;
+- si l'historique s'arrête (retrait de la cote, changement de nom), la part est convertie en cash à la dernière clôture disponible ;
+- si une paire n'existe pas du tout sur Binance, sa part reste en cash tout du long (signalé dans les résultats).
+
+Limite connue : les cryptos complètement disparues de Binance ne peuvent pas être téléchargées ; un biais du survivant résiduel reste possible et sera signalé.
+
+## Stratégie testée
+
+**H5** : la stratégie H1 *telle que validée et mise en paper trading* (`trend_adaptive` : moyenne 50/100/150/200 jours re-choisie chaque trimestre sur le meilleur Sharpe de l'année écoulée), appliquée **indépendamment à chaque crypto**, avec **10 parts égales** de 1 000 (capital 10 000). Pas de nouveau paramètre, pas d'optimisation supplémentaire.
+
+## Références
+
+1. **Buy & hold équipondéré** : chaque part achète sa crypto à la même date que la stratégie peut commencer, puis conserve.
+2. **Exposition constante** : chaque part investie en permanence à la même part moyenne que la stratégie, réajustée au-delà de 5 points.
+3. **Témoin aléatoire** : 100 tirages ; dans chaque tirage, chaque part suit une stratégie au hasard de même exposition et même durée de position que la stratégie sur cette crypto.
+4. **H1 sur le BTC seul**, pour comparaison.
+
+## Critères de succès (identiques à la recherche 1)
+
+Sur la période hors échantillon (à partir du 2018-08-17) :
+1. Sharpe > buy & hold équipondéré **et** > exposition constante ;
+2. max drawdown meilleur que le buy & hold équipondéré d'au moins 10 points ;
+3. meilleur qu'au moins 95 % des tirages aléatoires.
+
+Mesure d'activité (non critère) : nombre de trades par semaine sur l'ensemble du portefeuille.
+
+## Résultats de la recherche 2
+
+*(Section complétée après l'unique exécution — voir plus bas.)*
+
+---
+
+**Statut de la recherche 1** : H1 et H3 sont *prometteuses*, pas *gagnantes*. Étape suivante prévue par le protocole : paper trading. Avec ≈ 3 à 10 trades par an en journalier, des semaines de paper trading vérifieront la mécanique, pas la performance — celle-ci ne se jugera que sur des années.
