@@ -45,6 +45,7 @@ from bot.realtime.stream import PriceStream
 from bot.realtime.status import render, summarize
 from bot.realtime.trader import ConfigMismatch, make_identity
 from bot.report import run_comparison, verdict, write_report
+from bot.report.multi import UNIVERSE, per_asset_table, run_multi
 from bot.report.research import RANDOM_THRESHOLD, run_research
 from bot.strategies import STRATEGIES, BuyAndHold
 
@@ -262,6 +263,36 @@ def cmd_research(args: argparse.Namespace) -> None:
                 f"frais {costs.fee:.2%} + slippage {costs.slippage:.2%} par ordre ; seuil du témoin aléatoire : 95 %")
     report = write_report([r.section for r in results], args.reports_dir / f"research_{stamp}.html", subtitle,
                           random_threshold=RANDOM_THRESHOLD)
+    print(f"\nRapport : {report.resolve()}")
+
+
+def cmd_research_multi(args: argparse.Namespace) -> None:
+    """Recherche 2 (H5) : protocole pré-enregistré de docs/RECHERCHE.md, exécuté une seule fois."""
+    datasets = {}
+    for sym in UNIVERSE:
+        df = load_cache(cache_path(args.data_dir, "binance", f"{sym}/USDT", "1d"))
+        if df is None or df.empty:
+            print(f"  {sym}/USDT : pas de données → part en cash tout du long (règle du protocole)")
+            continue
+        datasets[sym] = df
+    costs = load_config(DEFAULT_CONFIG_PATH).backtest
+    result = run_multi(datasets, costs, n_seeds=args.seeds)
+    s = result.section
+    print(f"\n=== {s.title} — {s.buy_hold.equity.index[0]:%Y-%m-%d} → {s.buy_hold.equity.index[-1]:%Y-%m-%d} ===")
+    _print_table({"b&h équipondéré": s.buy_hold.metrics, **{k: v.metrics for k, v in s.extras.items()},
+                  "H5 (10 cryptos)": s.outcomes[0].metrics})
+    print(f"\n  Bat {result.random_pct:.0%} des tirages aléatoires | {result.trades_per_week:.2f} trades/semaine | "
+          f"investi en moyenne {result.average_weight:.0%}")
+    print("  Éligibilité :", ", ".join(f"{k} {v}" for k, v in result.eligible.items()))
+    print(f"  → {result.criteria.describe()}")
+    with pd.option_context("display.width", 200):
+        table = per_asset_table(datasets, costs)
+        print("\nDétail par crypto (informatif) :")
+        print(table.to_string(index=False, float_format=lambda x: f"{x:+.2f}"))
+    stamp = pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
+    subtitle = ("Binance /USDT 1d, 10 cryptos fixées à l'avance (top 10 d'août 2018), parts égales indépendantes, "
+                f"protocole docs/RECHERCHE.md (recherche 2) — frais {costs.fee:.2%} + slippage {costs.slippage:.2%}")
+    report = write_report([s], args.reports_dir / f"research_multi_{stamp}.html", subtitle, random_threshold=RANDOM_THRESHOLD)
     print(f"\nRapport : {report.resolve()}")
 
 
@@ -571,6 +602,12 @@ def build_parser() -> argparse.ArgumentParser:
     research.add_argument("--seeds", type=int, default=100)
     research.add_argument("--reports-dir", type=Path, default=Path("reports"))
     research.set_defaults(func=cmd_research)
+
+    multi = sub.add_parser("research-multi", help="Recherche 2 : filtre de tendance sur 10 cryptos (docs/RECHERCHE.md)")
+    multi.add_argument("--data-dir", type=Path, default=cfg.dir)
+    multi.add_argument("--seeds", type=int, default=100)
+    multi.add_argument("--reports-dir", type=Path, default=Path("reports"))
+    multi.set_defaults(func=cmd_research_multi)
 
     def add_realtime_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--exchange", default=None, help="défaut : trading.exchange du YAML")
