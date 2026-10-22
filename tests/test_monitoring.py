@@ -420,3 +420,23 @@ def test_compose_never_runs_live_unattended() -> None:
     assert "--live" not in compose  # le réel exige une confirmation tapée : jamais automatisé
     assert "restart: unless-stopped" in compose and "healthcheck" in compose
     assert "env_file" in compose
+
+
+def test_secondary_telegram_bot_uses_its_own_env_names(tmp_path: Path, monkeypatch) -> None:
+    for var in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_SANDBOX_BOT_TOKEN", "TELEGRAM_SANDBOX_CHAT_ID"):
+        monkeypatch.delenv(var, raising=False)
+    env = tmp_path / ".env"
+    env.write_text("TELEGRAM_BOT_TOKEN=1:main\nTELEGRAM_CHAT_ID=1\n")
+    assert isinstance(notifier_from_env(env), TelegramNotifier)
+    assert isinstance(notifier_from_env(env, name="SANDBOX"), NullNotifier)  # jamais le token du bot sérieux
+    env.write_text("TELEGRAM_SANDBOX_BOT_TOKEN=2:sand\nTELEGRAM_SANDBOX_CHAT_ID=2\n")
+    sandbox = notifier_from_env(env, name="SANDBOX")
+    assert isinstance(sandbox, TelegramNotifier) and sandbox.token == "2:sand"
+
+
+def test_sandbox_config_is_separate_from_serious_bot() -> None:
+    from bot.config import load_config
+
+    cfg = load_config()
+    assert cfg.sandbox.db != cfg.paper.db and cfg.sandbox.timeframe == "1m"
+    assert cfg.paper.strategy == "trend_adaptive"

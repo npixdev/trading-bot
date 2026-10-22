@@ -125,9 +125,15 @@ class TelegramNotifier:
         return list(found.items())
 
 
-def notifier_from_env(env_file: Path = Path(".env")) -> Notifier:
+def notifier_from_env(env_file: Path = Path(".env"), name: str | None = None) -> Notifier:
+    """`name` = bot Telegram secondaire (ex. "SANDBOX" → TELEGRAM_SANDBOX_BOT_TOKEN / TELEGRAM_SANDBOX_CHAT_ID).
+
+    Un bot Telegram par processus : deux processus qui écoutent le même token se gêneraient (Telegram
+    n'autorise qu'une écoute à la fois) et leurs messages se mélangeraient.
+    """
     load_dotenv(env_file, override=False)
-    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+    prefix = f"TELEGRAM_{name}_" if name else "TELEGRAM_"
+    token, chat_id = os.getenv(f"{prefix}BOT_TOKEN"), os.getenv(f"{prefix}CHAT_ID")
     if token and chat_id:
         return TelegramNotifier(token, chat_id)
     return NullNotifier()

@@ -1,4 +1,4 @@
-"""CLI : python -m bot <commande>."""
+﻿"""CLI : python -m bot <commande>."""
 
 from __future__ import annotations
 
@@ -265,9 +265,9 @@ def cmd_research(args: argparse.Namespace) -> None:
     print(f"\nRapport : {report.resolve()}")
 
 
-def _paper_setup(args: argparse.Namespace):  # noqa: ANN202
+def _paper_setup(args: argparse.Namespace, section: str = "paper"):  # noqa: ANN202
     app = load_config(DEFAULT_CONFIG_PATH)
-    pc = app.paper
+    pc = getattr(app, section)
     timeframe = args.timeframe or pc.timeframe
     strategy_name = args.strategy or pc.strategy
     params = {**(pc.params if strategy_name == pc.strategy else {}), **_parse_params(args.param)}
@@ -287,9 +287,9 @@ def _maybe_reset(db: Path, reset: bool) -> None:
 
 
 def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, db: Path, exchange: str,  # noqa: ANN001
-                symbol: str, timeframe: str) -> None:
-    notifier = notifier_from_env()
-    label = f"{mode.upper()} {exchange} {symbol} {timeframe}"
+                symbol: str, timeframe: str, telegram_name: str | None = None, label_prefix: str | None = None) -> None:
+    notifier = notifier_from_env(name=telegram_name)
+    label = f"{label_prefix or mode.upper()} {exchange} {symbol} {timeframe}"
     store = Store(db, listener=Alerts(notifier, label))
     try:
         identity = make_identity(mode, exchange, symbol, timeframe, strategy, risk)
@@ -298,7 +298,9 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
         store.close()
         raise SystemExit(str(exc)) from None
     alerts_on = isinstance(notifier, TelegramNotifier)
-    print(f"Journal : {db.resolve()}  |  alertes Telegram : {'actives' if alerts_on else 'non configurées'}")
+    hint = "" if alerts_on or not telegram_name else (
+        f" (crée un 2e bot Telegram et renseigne TELEGRAM_{telegram_name}_BOT_TOKEN / _CHAT_ID dans .env)")
+    print(f"Journal : {db.resolve()}  |  alertes Telegram : {'actives' if alerts_on else 'non configurées'}{hint}")
     print("Ctrl+C pour arrêter (l'état est sauvegardé en continu)\n")
     daily = DailySummary(store, notifier, label)
     store.commit()  # le fil d'écoute ouvre sa propre connexion : le schéma doit être écrit
@@ -328,11 +330,12 @@ def _run_trader(mode: str, feed: MarketFeed, broker, args, pc, strategy, risk, d
 
 
 def cmd_test_alert(args: argparse.Namespace) -> None:
-    notifier = notifier_from_env()
+    notifier = notifier_from_env(name=args.name)
+    prefix = f"TELEGRAM_{args.name}_" if args.name else "TELEGRAM_"
     if isinstance(notifier, TelegramNotifier):
         if args.db is None:
             if not notifier.send("✅ <b>Test d'alerte</b>\nLa configuration Telegram du bot de trading fonctionne."):
-                raise SystemExit("Échec de l'envoi : vérifie TELEGRAM_BOT_TOKEN et TELEGRAM_CHAT_ID.")
+                raise SystemExit(f"Échec de l'envoi : vérifie {prefix}BOT_TOKEN et {prefix}CHAT_ID.")
             print(f"Message de test envoyé à la conversation {notifier.chat_id} : vérifie Telegram.")
             return
         if not args.db.exists():
@@ -348,20 +351,20 @@ def cmd_test_alert(args: argparse.Namespace) -> None:
         print("État + graphique envoyés : vérifie Telegram." if ok else "Échec de l'envoi.")
         return
     load_dotenv(Path(".env"))
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    token = os.getenv(f"{prefix}BOT_TOKEN")
     if not token:
-        raise SystemExit("TELEGRAM_BOT_TOKEN absent de .env — voir README, section Alertes Telegram.")
+        raise SystemExit(f"{prefix}BOT_TOKEN absent de .env — voir README, section Alertes Telegram.")
     chats = TelegramNotifier(token, "").find_chat_ids()
     if not chats:
         raise SystemExit("Aucune conversation trouvée : envoie d'abord un message (ex. « bonjour ») à ton bot sur Telegram.")
-    print("Conversations trouvées — copie l'identifiant voulu dans .env (TELEGRAM_CHAT_ID=...) :")
+    print(f"Conversations trouvées — copie l'identifiant voulu dans .env ({prefix}CHAT_ID=...) :")
     for chat_id, name in chats:
         print(f"  {chat_id}  ({name})")
 
 
 def cmd_health(args: argparse.Namespace) -> None:
     app = load_config(DEFAULT_CONFIG_PATH)
-    default = {"paper": app.paper.db, "testnet": app.execution.testnet_db, "live": app.execution.live_db}
+    default = {"paper": app.paper.db, "sandbox": app.sandbox.db, "testnet": app.execution.testnet_db, "live": app.execution.live_db}
     db = args.db or default[args.mode]
     if not db.exists():
         raise SystemExit(f"KO : pas de journal {db}")
@@ -383,6 +386,19 @@ def cmd_paper(args: argparse.Namespace) -> None:
     print(f"Garde-fous : {'désactivés' if risk is None else risk}")
     feed = MarketFeed(exchange, symbol, timeframe)
     _run_trader("paper", feed, PaperBroker(costs), args, pc, strategy, risk, db, exchange, symbol, timeframe)
+
+
+def cmd_sandbox(args: argparse.Namespace) -> None:
+    """Bac à sable : paper trading rapide (1 min) pour s'amuser et apprendre, à côté du bot sérieux."""
+    app, pc, timeframe, strategy, risk, costs, db = _paper_setup(args, section="sandbox")
+    exchange = args.exchange or pc.exchange or app.trading.exchange
+    symbol = args.symbol or pc.symbol or app.trading.symbol
+    _maybe_reset(db, args.reset)
+    print(f"BAC À SABLE — paper trading pour apprendre (argent fictif) — {exchange} {symbol} {timeframe}, {strategy}")
+    print("⚠ Stratégie NON validée : beaucoup de trades = beaucoup de frais. Regarde le solde évoluer, c'est la leçon.")
+    feed = MarketFeed(exchange, symbol, timeframe)
+    _run_trader("paper", feed, PaperBroker(costs), args, pc, strategy, risk, db, exchange, symbol, timeframe,
+                telegram_name="SANDBOX", label_prefix="BAC À SABLE")
 
 
 def _connect(args: argparse.Namespace, live: bool):  # noqa: ANN202
@@ -473,7 +489,7 @@ def cmd_trade(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     app = load_config(DEFAULT_CONFIG_PATH)
-    default = {"paper": app.paper.db, "testnet": app.execution.testnet_db, "live": app.execution.live_db}
+    default = {"paper": app.paper.db, "sandbox": app.sandbox.db, "testnet": app.execution.testnet_db, "live": app.execution.live_db}
     db = args.db or default[args.mode]
     if not db.exists():
         raise SystemExit(f"Pas de journal : {db}. Lance d'abord le bot dans ce mode.")
@@ -574,6 +590,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_realtime_args(paper)
     paper.set_defaults(func=cmd_paper)
 
+    sandbox = sub.add_parser("sandbox", help="Bac à sable : paper trading rapide pour apprendre (section sandbox du YAML)")
+    add_realtime_args(sandbox)
+    sandbox.set_defaults(func=cmd_sandbox)
+
     trade = sub.add_parser("trade", help="Ordres réels : TESTNET par défaut ; --live = argent réel (+ confirmation)")
     add_realtime_args(trade)
     trade.add_argument("--live", action="store_true", help="ARGENT RÉEL. Exige en plus une confirmation tapée.")
@@ -589,17 +609,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     alert = sub.add_parser("test-alert", help="Envoie une alerte Telegram de test (ou aide à trouver TELEGRAM_CHAT_ID)")
     alert.add_argument("--db", type=Path, default=None, help="envoie l'état + le graphique de ce journal")
+    alert.add_argument("--name", default=None, help="bot Telegram secondaire, ex. SANDBOX (TELEGRAM_SANDBOX_*)")
     alert.set_defaults(func=cmd_test_alert)
 
     health = sub.add_parser("health", help="Code 0 si le bot est vivant (heartbeat récent), 1 sinon")
-    health.add_argument("--mode", choices=["paper", "testnet", "live"], default="paper")
+    health.add_argument("--mode", choices=["paper", "sandbox", "testnet", "live"], default="paper")
     health.add_argument("--db", type=Path, default=None)
     health.add_argument("--max-age", type=float, default=600, help="âge maximum du heartbeat, en secondes")
     health.set_defaults(func=cmd_health)
 
     for name in ("status", "paper-status"):
         status = sub.add_parser(name, help="Tableau de bord (journal SQLite)")
-        status.add_argument("--mode", choices=["paper", "testnet", "live"], default="paper")
+        status.add_argument("--mode", choices=["paper", "sandbox", "testnet", "live"], default="paper")
         status.add_argument("--db", type=Path, default=None)
         status.set_defaults(func=cmd_status)
     return parser

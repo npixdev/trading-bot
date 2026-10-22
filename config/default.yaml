@@ -53,6 +53,22 @@ paper:
     daily_loss_limit: null
     kill_switch_drawdown: 0.60
 
+sandbox:
+  # Bac à sable (python -m bot sandbox) : paper trading RAPIDE pour s'amuser et apprendre, à côté du bot
+  # sérieux. Stratégie NON validée : en 1 minute, les frais dépassent les mouvements de prix (étapes 1 et 3).
+  # Telegram séparé : TELEGRAM_SANDBOX_BOT_TOKEN / TELEGRAM_SANDBOX_CHAT_ID dans .env (un 2e bot @BotFather).
+  exchange: okx
+  symbol: BTC/USDT
+  timeframe: 1m
+  strategy: sma
+  params: {fast: 5, slow: 20}
+  initial_cash: 10000
+  poll_seconds: 60
+  warmup_bars: 300
+  db: data/sandbox.sqlite
+  use_risk: true
+  risk_overrides: {}        # garde-fous de la section risk (taille ATR, stop 3 ATR, limite 5 %/jour, kill switch 30 %)
+
 execution:
   # Ordres réels : testnet par défaut, live uniquement avec --live + confirmation au clavier.
   # Stratégie, timeframe et garde-fous : ceux de la section paper.

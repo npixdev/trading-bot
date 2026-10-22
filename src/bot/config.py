@@ -119,6 +119,10 @@ class AppConfig:
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     paper: PaperConfig = field(default_factory=PaperConfig)
+    sandbox: PaperConfig = field(default_factory=lambda: PaperConfig(
+        exchange="okx", symbol="BTC/USDT", timeframe="1m", strategy="sma", params={"fast": 5, "slow": 20},
+        warmup_bars=300, db=Path("data/sandbox.sqlite"), risk_overrides={},
+    ))
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
 
 
@@ -138,6 +142,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         backtest=BacktestConfig(**(raw.get("backtest") or {})),
         risk=RiskConfig(**(raw.get("risk") or {})),
         paper=_paper(raw.get("paper") or {}),
+        sandbox=_paper(raw["sandbox"]) if raw.get("sandbox") else AppConfig().sandbox,
         execution=_execution(raw.get("execution") or {}),
     )
 
