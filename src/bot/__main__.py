@@ -376,7 +376,8 @@ def cmd_health(args: argparse.Namespace) -> None:
 
 def cmd_paper(args: argparse.Namespace) -> None:
     app, pc, timeframe, strategy, risk, costs, db = _paper_setup(args)
-    exchange, symbol = args.exchange or app.trading.exchange, args.symbol or app.trading.symbol
+    exchange = args.exchange or pc.exchange or app.trading.exchange
+    symbol = args.symbol or pc.symbol or app.trading.symbol
     _maybe_reset(db, args.reset)
     print(f"PAPER TRADING (aucun ordre réel) — {exchange} {symbol} {timeframe}, {strategy}")
     print(f"Garde-fous : {'désactivés' if risk is None else risk}")

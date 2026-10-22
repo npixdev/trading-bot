@@ -299,3 +299,15 @@ def test_risk_state_roundtrip() -> None:
     restored = RiskManager.from_dict(RiskConfig(), m.to_dict())
     assert restored.to_dict() == m.to_dict()
     assert np.isclose(restored.stop, 94.0)
+
+
+def test_short_history_is_reported_instead_of_silent(tmp_path: Path) -> None:
+    """Vécu : OKX ne garde que ~470 jours de BTC/USDC journalier → le bot restait muet."""
+    feed = FakeFeed(_closes())  # 15 bougies seulement
+    trader = _trader(feed, tmp_path / "p.sqlite")  # warmup_bars=50
+    feed.advance(5)
+    trader.step()
+    trader.step()
+    events = trader.store.table("events")
+    assert (events["kind"] == "history_short").sum() == 1  # signalé une fois, pas à chaque tour
+    assert "6 bougies disponibles sur 50" in events[events["kind"] == "history_short"]["detail"].iloc[0]

@@ -175,3 +175,45 @@ def test_criteria_require_every_condition() -> None:
     assert not evaluate(_m(0.58, -0.40), bh, const, 0.97).passed  # Sharpe < buy & hold
     assert not evaluate(_m(0.62, -0.40), bh, _m(0.7, -0.4), None).passed  # Sharpe < exposition constante
     assert evaluate(_m(0.8, -0.40), bh, const, None).passed  # hasard non applicable (poids fractionnaire)
+
+
+# --- Filtre de tendance adaptatif (version temps réel de H1) ------------------------------------------
+
+
+def test_adaptive_trend_has_no_lookahead() -> None:
+    from bot.strategies.research import AdaptiveTrend
+
+    df = _daily_walk(1000, seed=8)
+    assert find_lookahead(AdaptiveTrend(), df, n_cuts=8) == []
+
+
+def test_adaptive_trend_does_not_depend_on_loaded_window() -> None:
+    """En temps réel, seules les 800 dernières bougies sont chargées : la décision doit rester la même."""
+    from bot.strategies.research import AdaptiveTrend
+
+    df = _daily_walk(1500, seed=9)
+    full = AdaptiveTrend().target_position(df)
+    tail = AdaptiveTrend().target_position(df.tail(800))
+    pd.testing.assert_series_equal(full.tail(100), tail.tail(100))
+
+
+def test_adaptive_trend_reselects_on_calendar_dates_only() -> None:
+    from bot.strategies.research import AdaptiveTrend
+
+    df = _daily_walk(1200, seed=10)
+    chosen = AdaptiveTrend().chosen_windows(df).dropna()
+    changes = chosen[chosen.diff().fillna(0) != 0].index
+    days = changes.as_unit("ns").asi8 // 86_400_000_000_000
+    assert (days % 91 == 0).all()  # le choix ne change qu'aux dates de re-choix
+    assert set(chosen.unique()) <= {50, 100, 150, 200}
+
+
+def test_identity_survives_json_roundtrip_with_tuple_params(tmp_path) -> None:
+    """Bug évité : (50, 100, 150, 200) devient [50, 100, 150, 200] une fois sauvegardé."""
+    import json
+
+    from bot.realtime.trader import make_identity
+    from bot.strategies.research import AdaptiveTrend
+
+    identity = make_identity("paper", "okx", "BTC/USDC", "1d", AdaptiveTrend(), None)
+    assert json.loads(json.dumps(identity)) == identity

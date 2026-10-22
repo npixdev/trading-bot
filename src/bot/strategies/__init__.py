@@ -2,14 +2,14 @@
 
 from bot.strategies.base import Alternate, BuyAndHold, RandomStrategy, Strategy
 from bot.strategies.mean_reversion import BollingerRsiReversion
-from bot.strategies.research import FixedWeight, LogisticML, TrendFilter, TrendVol, VolTarget
+from bot.strategies.research import AdaptiveTrend, FixedWeight, LogisticML, TrendFilter, TrendVol, VolTarget
 from bot.strategies.trend import DonchianBreakout, SmaCrossover
 
 STRATEGIES: dict[str, type[Strategy]] = {
     cls.name: cls
     for cls in (
         BuyAndHold, RandomStrategy, SmaCrossover, DonchianBreakout, BollingerRsiReversion, Alternate,
-        TrendFilter, VolTarget, TrendVol, LogisticML, FixedWeight,
+        TrendFilter, VolTarget, TrendVol, LogisticML, FixedWeight, AdaptiveTrend,
     )
 }
 

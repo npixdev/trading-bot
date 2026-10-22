@@ -75,6 +75,59 @@ class TrendVol(Strategy):
 
 
 @dataclass(frozen=True)
+class AdaptiveTrend(Strategy):
+    """H1 tel que validé, utilisable en temps réel : filtre de tendance dont la fenêtre est re-choisie
+    tous les `reselect_days` jours, parmi `windows`, sur le meilleur Sharpe des `train_days` jours
+    précédents (frais et slippage compris, exécution t+1, comme le walk-forward de la recherche).
+
+    Dates de re-choix alignées sur le calendrier (jours depuis 1970 multiples de `reselect_days`) : la
+    décision ne dépend pas de la fenêtre de données chargée, seulement des dates. Cash tant qu'il n'y a pas
+    `train_days` jours d'historique avant une date de re-choix (+ la plus longue moyenne).
+    """
+
+    name: ClassVar[str] = "trend_adaptive"
+    windows: tuple[int, ...] = (50, 100, 150, 200)
+    train_days: int = 365
+    reselect_days: int = 91
+    fee: float = 0.001
+    slippage: float = 0.0005
+    phase_days: int = 0  # décale les dates de re-choix (sert à vérifier que le résultat n'en dépend pas)
+
+    def chosen_windows(self, df: pd.DataFrame) -> pd.Series:
+        """Fenêtre retenue pour chaque bougie (NaN tant qu'aucun choix n'est possible)."""
+        from bot.backtest.engine import simulate  # import local : engine importe déjà les stratégies
+        from bot.config import BacktestConfig
+
+        cfg = BacktestConfig(fee=self.fee, slippage=self.slippage)
+        signals = {n: TrendFilter(window=n).target_position(df) for n in self.windows}
+        days = (df.index.as_unit("ns").asi8 // 86_400_000_000_000).astype(np.int64)
+        reselect = np.flatnonzero((days - self.phase_days) % self.reselect_days == 0)
+        chosen = pd.Series(np.nan, index=df.index)
+        for k in reselect:
+            first = k - self.train_days
+            if first - max(self.windows) < 0:
+                continue  # pas assez d'historique pour entraîner toutes les fenêtres honnêtement
+            train = df.iloc[: k]  # jusqu'à la veille de la date de re-choix : rien du futur
+            best, best_score = None, -math.inf
+            for n in self.windows:
+                sharpe = simulate(train, signals[n].iloc[: k], cfg, start=df.index[first]).metrics.sharpe
+                if not math.isnan(sharpe) and sharpe > best_score:
+                    best, best_score = n, sharpe
+            if best is None:
+                best = self.windows[0]
+            chosen.iloc[k:] = best  # valable jusqu'au prochain re-choix (écrasé ensuite)
+        return chosen
+
+    def target_position(self, df: pd.DataFrame) -> pd.Series:
+        chosen = self.chosen_windows(df)
+        position = pd.Series(0.0, index=df.index)
+        for n in self.windows:
+            signal = TrendFilter(window=n).target_position(df)
+            position[chosen == n] = signal[chosen == n]
+        return position
+
+
+@dataclass(frozen=True)
 class FixedWeight(Strategy):
     """Témoin à exposition constante : toujours `weight` investi (ex. 0,6 = 60 % BTC, 40 % cash)."""
 

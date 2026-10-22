@@ -12,6 +12,7 @@ Le Trader ne parle jamais à l'exchange pour trader : il passe par un broker (si
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from dataclasses import asdict
@@ -69,6 +70,7 @@ class Trader:
         self.last_bar: pd.Timestamp | None = None
         self.started: dict[str, Any] | None = None
         self._reconciled = False
+        self._warned_history = False
         state = store.load_state()
         if state is not None:
             state = _migrate_state(state)
@@ -123,8 +125,17 @@ class Trader:
         quote = self.feed.quote()
         self.broker.sync()
         self._log_broker_notes(now)
-        if candles.empty:
-            return
+        if len(candles) < self.warmup_bars * 0.95:
+            # Vécu : OKX ne garde que ~470 jours de BTC/USDC journalier → le bot restait muet, sans décision.
+            if not self._warned_history:
+                self._warned_history = True
+                detail = (f"seulement {len(candles)} bougies disponibles sur {self.warmup_bars} demandées : "
+                          "la stratégie risque de ne jamais pouvoir décider (choisir une paire avec plus d'historique)")
+                self.store.log_event(now, "history_short", detail)
+                log.warning(detail)
+                self.store.commit()
+            if candles.empty:
+                return
         if not self._reconciled:
             self._reconcile(now, quote)
         if self.started is None:
@@ -272,8 +283,12 @@ def _migrate_state(s: dict[str, Any]) -> dict[str, Any]:
 def make_identity(
     mode: str, exchange: str, symbol: str, timeframe: str, strategy: Strategy, risk: RiskConfig | None
 ) -> dict[str, Any]:
-    """Ce qui doit rester identique pour reprendre un journal existant."""
-    return {
+    """Ce qui doit rester identique pour reprendre un journal existant.
+
+    Passée par JSON : un tuple (ex. fenêtres (50, 100, 150, 200)) devient une liste une fois sauvegardé ;
+    sans cette normalisation, l'identité relue ne serait jamais égale et chaque redémarrage serait refusé.
+    """
+    identity = {
         "mode": mode,
         "exchange": exchange,
         "symbol": symbol,
@@ -282,3 +297,4 @@ def make_identity(
         "params": strategy.params,
         "risk": None if risk is None else asdict(risk),
     }
+    return json.loads(json.dumps(identity))

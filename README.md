@@ -56,7 +56,7 @@ Sections principales de `config/default.yaml` :
 | `data` | historique à télécharger | Binance BTC/USDT 1h depuis 2021 |
 | `backtest` | coûts simulés | frais 0,10 %, slippage 0,05 %, capital 10 000 |
 | `risk` | garde-fous | taille ATR à 1 % de risque, stop 3 ATR, perte max 5 %/jour, kill switch −30 % |
-| `paper` | stratégie temps réel | OKX BTC/USDC 1d, SMA 20/100, kill switch −15 % |
+| `paper` | stratégie temps réel | OKX BTC/USDT 1d, filtre de tendance adaptatif (validé par la recherche), taille 100 %, kill switch −60 % |
 | `execution` | ordres réels | testnet Binance BTC/USDT, capital géré max 100, prix plafond ±0,2 % |
 
 Les options de la ligne de commande surchargent le YAML. Chaque paramètre est commenté dans le fichier (pourquoi cette valeur, ce qui change si on la modifie).

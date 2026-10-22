@@ -35,6 +35,7 @@ IMMEDIATE = {
     "order_recovered": "ℹ️ <b>Ordre retrouvé</b> après une coupure",
     "reconcile": "⚠️ <b>Écart avec le solde réel</b>",
     "resume": "ℹ️ <b>Reprise après un arrêt</b>",
+    "history_short": "⚠️ <b>Historique insuffisant</b>",
     "run_start": "✅ <b>Bot démarré</b>",
     "run_end": "⏹️ <b>Bot arrêté</b>",
 }

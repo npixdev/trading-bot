@@ -29,16 +29,29 @@ risk:
 
 paper:
   # Paper trading : prix réels de trading.exchange, portefeuille fictif, AUCUN ordre envoyé.
+  # Stratégie validée par la recherche pré-enregistrée (docs/RECHERCHE.md, H1) : filtre de tendance
+  # dont la fenêtre (50/100/150/200 j) est re-choisie chaque trimestre sur le meilleur Sharpe de l'année écoulée.
+  # BTC/USDT et non BTC/USDC : OKX ne garde que ~470 jours d'historique journalier BTC/USDC, or la stratégie
+  # en demande ≥ 565 (365 j d'entraînement + 200 j de moyenne). Même prix à quelques dollars près, et c'est
+  # la paire de la recherche. (L'USDT n'est restreint en Europe que pour le trading réel.)
+  exchange: okx
+  symbol: BTC/USDT
   timeframe: 1d
-  strategy: sma
-  params: {fast: 20, slow: 100}
+  strategy: trend_adaptive
+  params: {}
   initial_cash: 10000
-  poll_seconds: 60          # fréquence de vérification du prix (stop-loss) et des nouvelles bougies
-  warmup_bars: 300          # historique chargé pour les indicateurs (≥ plus longue fenêtre + marge)
+  poll_seconds: 60          # tour complet de sécurité ; le stop et la clôture sont suivis en temps réel
+  warmup_bars: 800          # 365 j d'entraînement + 200 j pour la plus longue moyenne + marge
   db: data/paper.sqlite
   use_risk: true
   risk_overrides:
-    kill_switch_drawdown: 0.15  # pire DD en backtest ≈ −6 % → 15 % = la stratégie se comporte anormalement
+    # Garde-fous alignés sur la stratégie TESTÉE : ni taille ATR ni stop (non testés, ils en feraient une
+    # autre stratégie). Kill switch juste au-delà de la pire chute observée hors échantillon (−53 %).
+    sizing: fixed
+    position_fraction: 1.0
+    stop_atr_mult: null
+    daily_loss_limit: null
+    kill_switch_drawdown: 0.60
 
 execution:
   # Ordres réels : testnet par défaut, live uniquement avec --live + confirmation au clavier.

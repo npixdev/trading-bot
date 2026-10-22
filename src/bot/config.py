@@ -77,15 +77,20 @@ class RiskConfig:
 class PaperConfig:
     """Paper trading : vrais prix en temps réel, portefeuille fictif, aucun ordre envoyé."""
 
+    exchange: str | None = None  # None : trading.exchange
+    symbol: str | None = None  # None : trading.symbol
     timeframe: str = "1d"
-    strategy: str = "sma"
-    params: dict[str, Any] = field(default_factory=lambda: {"fast": 20, "slow": 100})
+    strategy: str = "trend_adaptive"
+    params: dict[str, Any] = field(default_factory=dict)
     initial_cash: float = 10_000.0
     poll_seconds: float = 60.0
-    warmup_bars: int = 300  # bougies clôturées chargées pour calculer les indicateurs
+    warmup_bars: int = 800  # bougies clôturées chargées : 365 j d'entraînement + 200 j de moyenne + marge
     db: Path = Path("data/paper.sqlite")
     use_risk: bool = True
-    risk_overrides: dict[str, Any] = field(default_factory=lambda: {"kill_switch_drawdown": 0.15})
+    risk_overrides: dict[str, Any] = field(default_factory=lambda: {
+        "sizing": "fixed", "position_fraction": 1.0, "stop_atr_mult": None,
+        "daily_loss_limit": None, "kill_switch_drawdown": 0.60,
+    })
 
 
 @dataclass(frozen=True)
