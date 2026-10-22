@@ -126,7 +126,26 @@ Mesure d'activité (non critère) : nombre de trades par semaine sur l'ensemble 
 
 ## Résultats de la recherche 2
 
-*(Section complétée après l'unique exécution — voir plus bas.)*
+### Exécution unique (2026-10-22, commit `54d6b3e`, commande `python -m bot research-multi`)
+
+Période 2018-08-17 → 2026-10-21. Les 10 paires existaient sur Binance ; EOS s'arrête le 2025-05-26 (changement de nom, part figée en cash) ; BCH ne commence qu'en 2019-11. Éligibilité (assez d'historique pour la stratégie) : BTC et ETH 2019-05, LTC 2019-08, XRP/EOS/XLM/ADA/IOTA/TRX 2020-01, BCH 2021-07.
+
+| | Rendement | CAGR | Max drawdown | Sharpe | Trades | Frais |
+|---|---|---|---|---|---|---|
+| Buy & hold équipondéré | +533 % | +25,3 % | −81,2 % | 0,68 | 10 | 10 |
+| Exposition constante (~43 %) | +343 % | +20,0 % | −48,1 % | 0,75 | 10 | 140 |
+| **H5 : filtre de tendance × 10** | +416 % | +22,2 % | −57,7 % | 0,69 | 598 | 4 289 |
+| *H1 sur le BTC seul (pour comparaison)* | +2 470 % | +48,7 % | −43,8 % | 1,15 | 56 | — |
+
+Critères : Sharpe > buy & hold équipondéré ✔ (0,69 vs 0,68, de justesse) ; Sharpe > exposition constante ✘ (0,75) ; drawdown −10 pts ✔ (−58 % vs −81 %) ; hasard ≥ 95 % ✘ (79 %). **Verdict : ÉCHEC du protocole.** Activité : 1,4 trade par semaine.
+
+Détail par crypto (informatif, période éligible de chacune) — Sharpe stratégie / buy & hold : BTC 1,20 / 0,91 ; ETH 0,89 / 0,86 ; ADA 0,74 / 0,70 ; IOTA 0,41 / 0,24 ; LTC 0,26 / 0,36 ; BCH 0,16 / 0,27 ; XLM 0,35 / 0,64 ; TRX 0,44 / 0,90 ; XRP 0,24 / 0,74 ; EOS −0,06 / 0,23. La stratégie ne fait mieux que le buy & hold que sur 4 cryptos sur 10.
+
+### Interprétation
+
+1. **Diversifier sur des altcoins n'a rien apporté** : plus de trades et de frais, un rapport gain/risque pas meilleur que d'investir simplement 43 % du capital en permanence. Les altcoins ont des tendances plus heurtées : la règle s'y fait souvent piéger (achat après une hausse, revente après la chute suivante).
+2. **Ce résultat affaiblit la confiance dans H1** : si le filtre de tendance captait un phénomène robuste des marchés crypto, il devrait marcher sur la plupart des cryptos. Il ne marche clairement que sur le BTC (et marginalement sur ETH). Deux lectures possibles, qu'on ne peut pas trancher avec ces données : soit le BTC a des tendances plus « propres » (actif dominant, plus liquide), soit le bon résultat de H1 doit beaucoup à la chance (deux krachs bien placés).
+3. **Conséquence pratique** : on garde H1 sur le BTC seul en paper trading, avec des attentes **plus prudentes** qu'avant cette recherche. On n'ajoute pas les altcoins.
 
 ---
 
