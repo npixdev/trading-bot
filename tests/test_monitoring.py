@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -271,6 +271,23 @@ def test_status_command_replies_with_chart(tmp_path: Path) -> None:
     assert again.poll() == 0
 
 
+def test_command_typos_and_missing_slash_still_work(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    tg = FakeTelegram()
+    tg.inbox = [_msg(1, "/stats"), _msg(2, "status"), _msg(3, "/Statut@trading_nmz_bot")]
+    assert TelegramCommands(tg, store, "PAPER", min_interval=0).poll() == 3
+    assert len(tg.photos) == 3
+
+
+def test_unknown_command_gets_an_answer(tmp_path: Path) -> None:
+    store, _, _ = _run_days(tmp_path)
+    tg = FakeTelegram()
+    tg.inbox = [_msg(1, "/acheter <tout>")]
+    TelegramCommands(tg, store, "PAPER", min_interval=0).poll()
+    assert "Je n'ai pas compris" in tg.texts[0] and "&lt;tout&gt;" in tg.texts[0]
+    assert "Commandes disponibles" in tg.texts[0] and tg.photos == []  # rien d'autre ne se passe
+
+
 def test_commands_from_other_chats_are_ignored(tmp_path: Path) -> None:
     store, _, _ = _run_days(tmp_path)
     tg = FakeTelegram(chat_id="42")
@@ -283,11 +300,11 @@ def test_commands_are_rate_limited_and_inactive_without_telegram(tmp_path: Path)
     store, _, _ = _run_days(tmp_path)
     clock = FakeClock()
     tg = FakeTelegram()
-    commands = TelegramCommands(tg, store, "PAPER", min_interval=20, clock=clock)
+    commands = TelegramCommands(tg, store, "PAPER", min_interval=10, clock=clock)
     commands.poll()
     tg.inbox = [_msg(5, "/status")]
-    assert commands.poll() == 0  # moins de 20 s : pas de nouvelle lecture
-    clock.sleep(21)
+    assert commands.poll() == 0  # moins de 10 s : pas de nouvelle lecture
+    clock.sleep(11)
     assert commands.poll() == 1
     assert TelegramCommands(NullNotifier(), store, "PAPER").poll() == 0
 

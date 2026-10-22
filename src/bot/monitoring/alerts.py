@@ -190,9 +190,12 @@ HELP = (
     "🤖 <b>Commandes disponibles</b>\n"
     "/status — état du bot + graphique\n"
     "/aide — cette aide\n\n"
-    "<i>Le bot répond seulement quand il est en marche (réponse en moins de 30 s).\n"
+    "<i>Le bot répond seulement quand il est en marche (en moins d'une minute).\n"
     "Lecture seule : aucune commande ne peut faire trader le bot.</i>"
 )
+# Tolérant aux fautes de frappe et aux oublis de « / » : un débutant ne doit pas rester sans réponse.
+STATUS_ALIASES = {"status", "stats", "stat", "statut", "etat", "état", "graphique", "graph"}
+HELP_ALIASES = {"aide", "help", "start", "commandes", "menu"}
 
 
 class TelegramCommands:
@@ -203,7 +206,7 @@ class TelegramCommands:
 
     META_KEY = "telegram_offset"
 
-    def __init__(self, notifier: Notifier, store: Store, label: str, min_interval: float = 20.0,
+    def __init__(self, notifier: Notifier, store: Store, label: str, min_interval: float = 10.0,
                  clock: Callable[[], float] = time.monotonic, max_age_seconds: float = 300.0) -> None:
         self.notifier, self.store, self.label = notifier, store, label
         self.min_interval, self.clock, self.max_age_seconds = min_interval, clock, max_age_seconds
@@ -232,12 +235,14 @@ class TelegramCommands:
                 # Envoyée pendant que le bot était arrêté : y répondre maintenant serait trompeur.
                 log.info("Commande Telegram périmée ignorée (envoyée le %s)", sent)
                 continue
-            command = (message.get("text") or "").strip().split("@")[0].split(" ")[0].lower()
-            if command in ("/status", "/etat", "/état"):
+            text = (message.get("text") or "").strip()
+            command = text.split("@")[0].split(" ")[0].lower().lstrip("/")
+            if command in STATUS_ALIASES:
                 send_status(self.store, self.notifier, self.label)
-                handled += 1
-            elif command in ("/aide", "/help", "/start"):
+            elif command in HELP_ALIASES:
                 self.notifier.send(HELP)
-                handled += 1
+            else:
+                self.notifier.send(f"🤔 Je n'ai pas compris « {escape(text[:50])} ».\n\n{HELP}")
+            handled += 1
         self.store.commit()
         return handled
