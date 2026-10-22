@@ -130,18 +130,19 @@ def _section_html(i: int, s: TimeframeSection) -> str:
 </section>"""
 
 
-def render_html(sections: list[TimeframeSection], subtitle: str) -> str:
+def render_html(sections: list[TimeframeSection], subtitle: str, random_threshold: float = 0.90) -> str:
     data = [_chart_data(s) for s in sections]
     body = "".join(_section_html(i, s) for i, s in enumerate(sections))
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     return (
         template.replace("__SUBTITLE__", html.escape(subtitle))
+        .replace("__THRESHOLD__", f"{random_threshold * 100:.0f}")
         .replace("__SECTIONS__", body)
         .replace("__DATA__", json.dumps(data, separators=(",", ":")))
     )
 
 
-def write_report(sections: list[TimeframeSection], path: Path, subtitle: str) -> Path:
+def write_report(sections: list[TimeframeSection], path: Path, subtitle: str, random_threshold: float = 0.90) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_html(sections, subtitle), encoding="utf-8")
+    path.write_text(render_html(sections, subtitle, random_threshold), encoding="utf-8")
     return path

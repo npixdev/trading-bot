@@ -45,4 +45,40 @@ Une hypothèse prometteuse **n'est pas une stratégie gagnante** : elle passerai
 
 ## Résultats
 
-*(Section complétée après l'unique exécution du protocole — voir plus bas.)*
+### Exécution unique du protocole (2026-10-22, commit `ddd1c9c`, commande `python -m bot research`)
+
+Hors échantillon du **2018-08-17 au 2026-10-21** (8,2 ans), frais 0,10 % + slippage 0,05 %.
+
+| | Rendement | CAGR | Max drawdown | Sharpe | Trades | Investi en moyenne | Verdict |
+|---|---|---|---|---|---|---|---|
+| Buy & hold | +1 229 % | +37,2 % | −76,6 % | 0,83 | 1 | 100 % | référence |
+| DCA 52 semaines | +1 474 % | +40,1 % | −76,6 % | 0,87 | 52 achats | 100 % | référence |
+| **H1 Filtre de tendance** | **+1 495 %** | **+40,3 %** | **−53,0 %** | **1,00** | 86 | 54 % | ✔ **prometteuse** |
+| H2 Ciblage de volatilité | +314 % | +19,0 % | −76,0 % | 0,60 | 33 | 85 % | ✘ échec |
+| **H3 Tendance + volatilité** | +748 % | +29,9 % | **−44,1 %** | **0,91** | 64 | 49 % | ✔ **prometteuse** |
+| H4 IA (régression logistique) | **−45,7 %** | −7,2 % | −61,6 % | 0,06 | 425 | 38 % | ✘ échec |
+
+Détail des critères :
+- **H1** : Sharpe 1,00 > buy & hold 0,83 ✔ ; > exposition constante 54 % (0,83) ✔ ; drawdown −53 % vs −77 % ✔ ; meilleur que 97 % des stratégies aléatoires ✔.
+- **H3** : Sharpe 0,91 > 0,83 ✔ ; > exposition constante 49 % (0,83) ✔ ; drawdown −44 % vs −77 % ✔ ; témoin aléatoire non applicable (poids fractionnaire).
+- **H2** : Sharpe 0,60, inférieur au buy & hold comme à l'exposition constante 85 % ; drawdown quasi inchangé (−76 %).
+- **H4** : Sharpe 0,06 ; 425 trades et 6 415 de frais ; Sharpe moyen de 0,65 sur les entraînements → 0,20 en test : **surapprentissage**. Prédire le sens du lendemain du BTC revient, à ces coûts, à jouer à pile ou face en payant à chaque lancer.
+
+### Vérifications exploratoires (hors protocole, à titre indicatif)
+
+Faites **après** avoir vu les résultats : elles ne comptent pas comme preuve, elles servent à comprendre.
+
+- **Hasard, 200 tirages** : H1 meilleur que 96,5 % (rendement et Sharpe).
+- **Paramètres fixes, sans optimisation** (même période) : SMA 50 → Sharpe 1,22 ; SMA 100 → 1,16 ; SMA 150 → 1,16 ; SMA 200 → 0,91 ; drawdowns de −39 % à −64 %. Toutes les fenêtres font au moins aussi bien que le buy & hold en Sharpe : le résultat ne repose pas sur un réglage précis. L'optimisation par fenêtre n'a pas aidé (elle a surtout choisi SMA 50, 17 fois sur 33).
+- **Frais** (SMA 200 fixe) : Sharpe 0,91 à 0,08 % de frais, 0,86 à 0,40 % : robuste (≈ 3 à 4 trades par an).
+- **Année par année** (H1 vs buy & hold) : 2018 −20 % vs −44 % ; 2019 +81 % vs +89 % ; 2020 +251 % vs +302 % ; 2021 +57 % vs +58 % ; 2022 −35 % vs −65 % ; 2023 +83 % vs +154 % ; 2024 +67 % vs +112 % ; 2025 −14 % vs −7 % ; 2026 (partiel) +10 % vs −5 %.
+
+### Interprétation
+
+1. **Le filtre de tendance gagne en évitant les krachs, pas en battant le marché quand il monte.** Toute l'avance vient de 2018 et 2022. Dans les années de forte hausse, il fait nettement moins bien (2023 : +83 % contre +154 %). Si le futur n'a pas de grand marché baissier, il fera probablement **moins bien** que le buy & hold.
+2. **Il reste risqué** : −53 % de drawdown, et seulement 9 % de trades gagnants (beaucoup de petites pertes, quelques très gros gains) — psychologiquement difficile à suivre.
+3. **Échantillon limité** : un seul actif, 8 ans, essentiellement 2 grands marchés baissiers. Le suivi de tendance est par ailleurs l'une des stratégies les mieux documentées sur les marchés, ce qui le rend plus crédible qu'une découverte isolée — mais aussi connu de tous.
+4. **L'IA a échoué**, comme attendu : plus de variables et plus de trades, c'est plus de bruit et plus de frais.
+5. **Résultat différent de l'étape 3** (croisement de moyennes, 2022-2026, « indiscernable du hasard ») : autre règle (prix vs moyenne), et surtout une période 2018-2026 qui contient deux krachs au lieu d'un.
+
+**Statut** : H1 et H3 sont *prometteuses*, pas *gagnantes*. Étape suivante prévue par le protocole : paper trading. Avec ≈ 3 à 10 trades par an en journalier, des semaines de paper trading vérifieront la mécanique, pas la performance — celle-ci ne se jugera que sur des années.

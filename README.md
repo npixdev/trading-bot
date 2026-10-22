@@ -229,6 +229,21 @@ Hors échantillon (walk-forward, janv. 2022 → oct. 2026, frais 0,10 % + slippa
 
 Aucune combinaison ne fait mieux que 90 % des stratégies aléatoires de même exposition ; la meilleure (Donchian 4h, 89 %) est cohérente avec la chance vu le nombre d'essais. Ces stratégies réduisent les chutes (drawdown −33 % à −52 % contre −67 %), **mais le hasard investi aussi souvent en fait autant**. Le timeframe 1h est le pire (frais). Détails : `python -m bot compare`.
 
+### Recherche pré-enregistrée (2018 → 2026, bougies journalières)
+
+Protocole écrit et commité **avant** tout test : [docs/RECHERCHE.md](docs/RECHERCHE.md). Commande : `python -m bot research`.
+
+| | Rendement | Sharpe | Max drawdown | Verdict |
+|---|---|---|---|---|
+| Buy & hold | +1 229 % | 0,83 | −76,6 % | référence |
+| DCA 52 semaines | +1 474 % | 0,87 | −76,6 % | référence |
+| Filtre de tendance | +1 495 % | **1,00** | **−53,0 %** | prometteuse (bat 97 % du hasard) |
+| Tendance + volatilité | +748 % | **0,91** | **−44,1 %** | prometteuse |
+| Ciblage de volatilité | +314 % | 0,60 | −76,0 % | échec |
+| IA (régression logistique) | −45,7 % | 0,06 | −61,6 % | échec (surapprentissage, 425 trades) |
+
+Le filtre de tendance gagne **en évitant les krachs** (2018, 2022), pas en montant plus vite : il fait nettement moins bien que le buy & hold dans les années de forte hausse. *Prometteuse* ≠ *gagnante*.
+
 ## Limites connues
 
 - **Stop-loss logiciel** : il n'agit que si le bot tourne.

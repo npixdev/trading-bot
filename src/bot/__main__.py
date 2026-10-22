@@ -45,7 +45,7 @@ from bot.realtime.stream import PriceStream
 from bot.realtime.status import render, summarize
 from bot.realtime.trader import ConfigMismatch, make_identity
 from bot.report import run_comparison, verdict, write_report
-from bot.report.research import run_research
+from bot.report.research import RANDOM_THRESHOLD, run_research
 from bot.strategies import STRATEGIES, BuyAndHold
 
 
@@ -260,7 +260,8 @@ def cmd_research(args: argparse.Namespace) -> None:
     stamp = pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
     subtitle = (f"{args.exchange} {args.symbol} 1d, protocole pré-enregistré docs/RECHERCHE.md — walk-forward 365 j / 91 j, "
                 f"frais {costs.fee:.2%} + slippage {costs.slippage:.2%} par ordre ; seuil du témoin aléatoire : 95 %")
-    report = write_report([r.section for r in results], args.reports_dir / f"research_{stamp}.html", subtitle)
+    report = write_report([r.section for r in results], args.reports_dir / f"research_{stamp}.html", subtitle,
+                          random_threshold=RANDOM_THRESHOLD)
     print(f"\nRapport : {report.resolve()}")
 
 
