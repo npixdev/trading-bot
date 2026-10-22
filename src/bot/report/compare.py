@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -27,6 +27,7 @@ class StrategyOutcome:
     name: str
     wf: WalkForwardResult
     bench: RandomBenchmark | None
+    verdict_text: str | None = None  # verdict déjà calculé (ex. critères pré-enregistrés de la recherche)
 
     @property
     def metrics(self) -> Metrics:
@@ -43,6 +44,8 @@ class TimeframeSection:
     timeframe: str
     buy_hold: BacktestResult
     outcomes: list[StrategyOutcome]
+    extras: dict[str, BacktestResult] = field(default_factory=dict)  # autres références (DCA, exposition constante…)
+    title: str | None = None
 
 
 def verdict(outcome: StrategyOutcome, buy_hold: Metrics) -> str:

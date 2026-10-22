@@ -53,6 +53,7 @@ def _metric_cells(m: Metrics) -> str:
 def _chart_data(section: TimeframeSection) -> dict[str, Any]:
     curves = {"buy & hold": section.buy_hold.equity}
     curves.update({o.name: o.wf.equity for o in section.outcomes})
+    curves.update({name: result.equity for name, result in section.extras.items()})
     daily = pd.DataFrame({k: _daily(v) for k, v in curves.items()}).ffill()
     drawdown = daily / daily.cummax() - 1
     return {
@@ -76,7 +77,7 @@ def _section_html(i: int, s: TimeframeSection) -> str:
         rows.append(
             f'<tr><th scope="row"><span class="key" style="background:var(--series-{j + 1})"></span>'
             f"{html.escape(o.name)}</th>{_metric_cells(o.metrics)}"
-            f'<td class="num">{pct_cell}</td><td>{html.escape(verdict(o, bh))}</td></tr>'
+            f'<td class="num">{pct_cell}</td><td>{html.escape(o.verdict_text or verdict(o, bh))}</td></tr>'
         )
         win_rows = "".join(
             f"<tr><td>{r.test_start:%Y-%m-%d} → {r.test_end:%Y-%m-%d}</td>"
@@ -101,9 +102,17 @@ def _section_html(i: int, s: TimeframeSection) -> str:
             f'<th class="num">Sharpe train</th><th class="num">Sharpe test</th><th class="num">Rendement test</th>'
             f"</tr></thead><tbody>{win_rows}</tbody></table></div></details>"
         )
+    for k, (name, result) in enumerate(s.extras.items()):
+        rows.insert(
+            1 + k,
+            f'<tr><th scope="row"><span class="key" style="background:var(--series-{len(s.outcomes) + k + 1})"></span>'
+            f"{html.escape(name)}</th>{_metric_cells(result.metrics)}"
+            f'<td class="num">—</td><td>référence</td></tr>',
+        )
+    title = s.title or f"Timeframe {s.timeframe}"
     return f"""
 <section>
-  <h2>Timeframe {html.escape(s.timeframe)}</h2>
+  <h2>{html.escape(title)}</h2>
   <p class="sub">Hors échantillon du {start:%Y-%m-%d} au {end:%Y-%m-%d}.</p>
   <div class="legend" data-chart="{i}"></div>
   <figure><figcaption>Valeur du portefeuille (échelle logarithmique, départ 10 000)</figcaption>

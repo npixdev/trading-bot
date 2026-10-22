@@ -45,6 +45,7 @@ from bot.realtime.stream import PriceStream
 from bot.realtime.status import render, summarize
 from bot.realtime.trader import ConfigMismatch, make_identity
 from bot.report import run_comparison, verdict, write_report
+from bot.report.research import run_research
 from bot.strategies import STRATEGIES, BuyAndHold
 
 
@@ -238,6 +239,29 @@ def cmd_compare(args: argparse.Namespace) -> None:
     stamp = pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
     path = write_report(sections, args.reports_dir / f"compare_{stamp}.html", subtitle)
     print(f"\nRapport : {path.resolve()}")
+
+
+def cmd_research(args: argparse.Namespace) -> None:
+    """Exécute le protocole pré-enregistré de docs/RECHERCHE.md (une seule fois, sans ajustement)."""
+    path = cache_path(args.data_dir, args.exchange, args.symbol, "1d")
+    df = load_cache(path)
+    if df is None or df.empty:
+        raise SystemExit(f"Pas de cache : {path}. Lance d'abord : python -m bot fetch --timeframe 1d --since 2017-08-17")
+    costs = load_config(DEFAULT_CONFIG_PATH).backtest
+    results = run_research(df, costs, n_seeds=args.seeds)
+    for r in results:
+        s = r.section
+        print(f"\n=== {r.label} — hors échantillon {s.buy_hold.equity.index[0]:%Y-%m-%d} → {s.buy_hold.equity.index[-1]:%Y-%m-%d} ===")
+        table = {"buy&hold": s.buy_hold.metrics, **{k: v.metrics for k, v in s.extras.items()},
+                 s.outcomes[0].name: s.outcomes[0].metrics}
+        _print_table(table)
+        print(f"  Investi en moyenne : {r.average_weight:.0%}")
+        print(f"  → {r.criteria.describe()}")
+    stamp = pd.Timestamp.now(tz="UTC").strftime("%Y%m%d-%H%M")
+    subtitle = (f"{args.exchange} {args.symbol} 1d, protocole pré-enregistré docs/RECHERCHE.md — walk-forward 365 j / 91 j, "
+                f"frais {costs.fee:.2%} + slippage {costs.slippage:.2%} par ordre ; seuil du témoin aléatoire : 95 %")
+    report = write_report([r.section for r in results], args.reports_dir / f"research_{stamp}.html", subtitle)
+    print(f"\nRapport : {report.resolve()}")
 
 
 def _paper_setup(args: argparse.Namespace):  # noqa: ANN202
@@ -521,6 +545,14 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--slippage", type=float, default=None)
     cmp.add_argument("--reports-dir", type=Path, default=Path("reports"))
     cmp.set_defaults(func=cmd_compare)
+
+    research = sub.add_parser("research", help="Exécute le protocole pré-enregistré (docs/RECHERCHE.md)")
+    research.add_argument("--exchange", default=cfg.exchange)
+    research.add_argument("--symbol", default=cfg.symbol)
+    research.add_argument("--data-dir", type=Path, default=cfg.dir)
+    research.add_argument("--seeds", type=int, default=100)
+    research.add_argument("--reports-dir", type=Path, default=Path("reports"))
+    research.set_defaults(func=cmd_research)
 
     def add_realtime_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--exchange", default=None, help="défaut : trading.exchange du YAML")

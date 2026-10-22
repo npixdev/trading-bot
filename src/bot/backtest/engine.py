@@ -53,11 +53,16 @@ def simulate(
     start: pd.Timestamp | str | None = None,
     end: pd.Timestamp | str | None = None,
     risk: RiskConfig | None = None,
+    rebalance_band: float | None = None,
 ) -> BacktestResult:
     """Simule `target` (décisions à la clôture) sur `df`, en ne tradant que dans [start, end].
 
     Le décalage d'une bougie est fait ici, sur l'historique complet, *avant* de découper :
     la première bougie de la période peut donc exécuter une décision prise juste avant.
+
+    `rebalance_band` (ex. 0.05) : si la part réellement investie s'écarte de la cible de plus de
+    5 points (à cause des mouvements de prix), on la réajuste. Sans bande, la position n'est
+    retouchée que lorsque la cible change.
     """
     signals = target.reindex(df.index).astype(float).fillna(0.0).clip(0.0, 1.0).shift(1).fillna(0.0)
     data = df.loc[start:end]
@@ -91,6 +96,8 @@ def simulate(
             elif manager is not None and wi == 0:
                 manager.on_exit()
             current_w = wi
+        elif rebalance_band is not None and current_w > 0 and abs(book.weight(o) - current_w) > rebalance_band:
+            book.rebalance(t, o, current_w)
         if manager is not None and book.units > 0:
             cap = manager.exposure_cap(t, book.units * o / book.value(o))
             if cap is not None:
@@ -132,7 +139,11 @@ def run_backtest(
     start: pd.Timestamp | str | None = None,
     end: pd.Timestamp | str | None = None,
     risk: RiskConfig | None = None,
+    rebalance_band: float | None = None,
 ) -> BacktestResult:
     """Calcule le signal sur tout l'historique jusqu'à `end` (indicateurs « chauds »), trade dans [start, end]."""
     history = df.loc[:end]
-    return simulate(history, strategy.target_position(history), config, start=start, end=end, risk=risk)
+    return simulate(
+        history, strategy.target_position(history), config, start=start, end=end, risk=risk,
+        rebalance_band=rebalance_band,
+    )
